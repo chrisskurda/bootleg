@@ -12,6 +12,6 @@ let threw = false; try { await a.import({ format: 'x' }); } catch { threw = true
 const tracks = [{ title: 'Café', artist: 'The Quarterlies', album: 'Funk', duration: 4, src: { name: '01 Café.flac' } }, { title: 'Low Pressure', artist: 'The Isobars', src: { name: 'x.m4a' } }];
 const m3u = toM3U('Mix', tracks.map(x => ({ ...x, path: '/music/' + x.src.name })), { relativeTo: '/music' }), p = parseM3U(m3u);
 t('M3U round trip keeps name, artist/title, order', p.name === 'Mix' && p.items.length === 2 && p.items[0].artist === 'The Quarterlies' && p.items[0].title === 'Café' && p.items[0].path === '01 Café.flac');
-t('entries resolve by file name, then artist+title, then title', matchEntries(parseM3U('#EXTINF:1,The Isobars - Low Pressure\nelsewhere/zzz.mp3\n01 Café.flac\n'), tracks).map(m => m.track?.title).join() === 'Low Pressure,Café');
+t('entries resolve by file name, then artist+title, then title', matchEntries(parseM3U('#EXTINF:1,The Isobars - Low Pressure\nelsewhere/zzz.mp3\n01 Café.flac\n').items, tracks).map(m => m.track?.title).join() === 'Low Pressure,Café');
 const pl = await a.savePlaylist({ name: 'Road', items: ['local:1', 'local:2'] }); t('playlists persist and export with the notes file', (await a.playlists()).length === 1 && (await a.export()).playlists[0].id === pl.id);
 console.log(bad ? `\n${bad} FAILED` : '\nall notes tests pass'); process.exit(bad ? 1 : 0);
