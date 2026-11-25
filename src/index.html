@@ -41,7 +41,9 @@
         <div id="trackList" class="rows"></div>
         <div id="emptyTracks" class="empty"><b>Add some music.</b><br>Choose a folder (or drop one here). Tags and cover art are read from the files.<br>A stem render folder (with <code>manifest.json</code> and <code>stems/</code>) shows up under <i>Stem renders</i>.</div>
       </section>
-      <section id="view-albums" class="view" hidden><div id="albumGrid" class="grid"></div><div id="emptyAlbums" class="empty">No albums yet — albums come from your files' tags.</div></section>
+      <section id="view-albums" class="view" hidden>
+        <div class="toolbar"><div class="seg" id="albumMode" role="group" aria-label="Album view"><button data-mode="grid" title="Grid">▦ Grid</button><button data-mode="list" title="List">☰ List</button><button data-mode="flow" title="Cover flow">◫ Flow</button></div></div>
+        <div id="albumGrid" class="grid"></div><div id="albumList" class="alist" hidden></div><div id="albumFlow" class="flowwrap" hidden></div><div id="albumDetail" class="adetail" hidden></div><div id="emptyAlbums" class="empty">No albums yet — albums come from your files' tags.</div></section>
       <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem renders yet. Add a MusicGen render folder to mute, solo and watch each stem.</div></section>
 
       <section id="view-notes" class="view" hidden>

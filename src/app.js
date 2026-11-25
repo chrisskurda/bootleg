@@ -42,11 +42,48 @@ function renderTracks() {
   shown = lib.search(lib.sortedTracks(), $('#search').value); const list = $('#trackList'); list.replaceChildren(...shown.map(trackRow));
   $('#emptyTracks').hidden = lib.visibleTracks.length > 0; $('.thead').hidden = !lib.visibleTracks.length;
 }
-function renderAlbums() {
-  const q = $('#search').value.toLowerCase(), list = lib.albums().filter(a => !q || (a.album + ' ' + a.artist).toLowerCase().includes(q));
-  $('#albumGrid').replaceChildren(...list.map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${a.tracks.length} tracks`))));
-  $('#emptyAlbums').hidden = list.length > 0;
+// ---- albums: grid / list / cover flow
+let flowIdx = 0, openKey = null;
+const albumInfo = a => { const yrs = a.tracks.map(t => +t.year).filter(Boolean), dur = a.tracks.reduce((n, t) => n + (t.duration || 0), 0); return { year: yrs.length ? Math.min(...yrs) : '', dur }; };
+const hms = s => { s = Math.round(s); const hh = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return hh ? `${hh} h ${m} min` : `${m} min`; };
+function albumTracks(a) {
+  return h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), ondblclick: () => player.playList(a.tracks, i) },
+    h('span', { class: 'n' }, String(t.track || i + 1)), h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist && t.artist !== a.artist ? t.artist : ''), h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''),
+    h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => player.playList(a.tracks, i) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')))));
 }
+function albumActions(a) {
+  return h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => player.playList(a.tracks, 0) }, '▶ Play album'),
+    h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${a.tracks.length} tracks`); } }, '+ Queue'));
+}
+function albumHead(a) { const i = albumInfo(a); return h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover big'), h('div', {}, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, i.year, `${a.tracks.length} tracks`, i.dur ? hms(i.dur) : ''].filter(Boolean).join(' · ')), albumActions(a))); }
+function renderAlbums() {
+  const mode = settings.albumView, q = $('#search').value.toLowerCase(), list = lib.albums().filter(a => !q || (a.album + ' ' + a.artist).toLowerCase().includes(q));
+  $$('#albumMode button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode)); $('#albumGrid').hidden = mode !== 'grid'; $('#albumList').hidden = mode !== 'list'; $('#albumFlow').hidden = mode !== 'flow'; $('#emptyAlbums').hidden = list.length > 0;
+  if (openKey && !list.some(a => a.key === openKey)) openKey = null;
+  if (mode === 'grid') { $('#albumDetail').hidden = true; $('#albumGrid').replaceChildren(...list.map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${a.tracks.length} tracks`)))); return; }
+  if (mode === 'list') {
+    $('#albumDetail').hidden = true;
+    $('#albumList').replaceChildren(h('div', { class: 'arow head' }, h('span'), h('span', {}, 'Album'), h('span', {}, 'Artist'), h('span', { class: 'r' }, 'Year'), h('span', { class: 'r' }, 'Tracks'), h('span', { class: 'r' }, 'Length')),
+      ...list.map(a => { const i = albumInfo(a), open = openKey === a.key; return h('div', { class: 'agroup' + (open ? ' open' : '') }, h('div', { class: 'arow', onclick: () => { openKey = open ? null : a.key; renderAlbums(); }, ondblclick: () => player.playList(a.tracks, 0) },
+        cover(a.coverUrl, 'cover sm'), h('span', { class: 'tt' }, a.album), h('span', { class: 'muted' }, a.artist || ''), h('span', { class: 'r muted' }, i.year || ''), h('span', { class: 'r muted' }, a.tracks.length), h('span', { class: 'r muted' }, i.dur ? hms(i.dur) : '')), open ? h('div', { class: 'aopen' }, albumActions(a), albumTracks(a)) : null); }));
+    return;
+  }
+  // cover flow: a 3D carousel of the albums around the selected one; click a side cover to bring it forward, click the centre one to play
+  const flow = $('#albumFlow'), det = $('#albumDetail'); flowIdx = Math.max(0, Math.min(list.length - 1, flowIdx));
+  if (!list.length) { flow.replaceChildren(); det.hidden = true; return; }
+  const stage = h('div', { class: 'flow', tabindex: 0, 'aria-label': 'Cover flow: arrow keys or scroll to browse' }), W = 8;
+  for (let i = Math.max(0, flowIdx - W); i <= Math.min(list.length - 1, flowIdx + W); i++) {
+    const a = list[i], off = i - flowIdx, sgn = Math.sign(off), el = h('div', { class: 'fitem' + (off === 0 ? ' center' : ''), title: a.album, onclick: () => { if (i === flowIdx) player.playList(a.tracks, 0); else { flowIdx = i; renderAlbums(); } } }, cover(a.coverUrl, 'fcover'));
+    el.style.transform = off === 0 ? 'translateX(-50%) translateZ(60px)' : `translateX(calc(-50% + ${sgn * 150 + off * 64}px)) translateZ(${-Math.abs(off) * 40}px) rotateY(${-sgn * 58}deg)`; el.style.zIndex = String(100 - Math.abs(off)); el.style.opacity = String(Math.max(0.15, 1 - Math.abs(off) * 0.11)); stage.append(el);
+  }
+  stage.onwheel = e => { e.preventDefault(); const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; if (Math.abs(d) < 4) return; const now = performance.now(); if (now - (stage._t || 0) < 90) return; stage._t = now; flowIdx += d > 0 ? 1 : -1; renderAlbums(); };
+  const scrub = h('input', { type: 'range', class: 'fscrub', min: 0, max: Math.max(0, list.length - 1), value: flowIdx, 'aria-label': 'Browse albums', oninput: e => { flowIdx = +e.target.value; renderAlbums(); $('#albumFlow .fscrub')?.focus(); } });
+  const cur = list[flowIdx], info = albumInfo(cur);
+  flow.replaceChildren(stage, h('div', { class: 'fcap' }, h('div', { class: 'big' }, cur.album), h('div', { class: 'muted' }, [cur.artist, info.year].filter(Boolean).join(' · '))), scrub);
+  det.hidden = false; det.replaceChildren(albumHead(cur), albumTracks(cur));
+}
+$$('#albumMode button').forEach(b => { b.onclick = () => { settings.albumView = b.dataset.mode; applySettings(); renderAlbums(); }; });
+
 function renderRenders() {
   const list = lib.search(lib.visibleRenders, $('#search').value);
   $('#renderList').replaceChildren(...list.map(r => h('div', { class: 'rcard', onclick: () => player.playList([r], 0) }, cover(r.coverUrl), h('div', {}, h('div', { class: 'big' }, r.title),
@@ -65,7 +102,7 @@ $('#search').oninput = () => renderAll();
 
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active;
-const DEFAULTS = { cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -198,6 +235,7 @@ addEventListener('keydown', e => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'range' && document.activeElement.type !== 'checkbox';
   if (e.key === '/' && !typing) { e.preventDefault(); $('#search').focus(); return; } if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
   if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
+  else if (view === 'albums' && settings.albumView === 'flow' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { flowIdx += e.key === 'ArrowRight' ? 1 : -1; renderAlbums(); }
   else if (e.key === 'ArrowRight') { e.shiftKey ? player.next() : player.seek(player.pos() + 5); } else if (e.key === 'ArrowLeft') { e.shiftKey ? player.prev() : player.seek(player.pos() - 5); }
   else if (e.key === 'ArrowUp') { vol.value = Math.min(1, +vol.value + 0.05); vol.oninput(); } else if (e.key === 'ArrowDown') { vol.value = Math.max(0, +vol.value - 0.05); vol.oninput(); }
   else if (e.key === 'f' && view === 'now') viz.fullscreen(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
