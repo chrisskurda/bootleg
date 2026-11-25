@@ -20,10 +20,14 @@ const blank = key => ({ key, rating: 0, tags: [], notes: [], provenance: null, f
 export class NotesStore extends EventTarget {
   constructor(backend = new MemoryBackend()) { super(); this.b = backend; }
   async get(key) { return (await this.b.get('t:' + key)) || blank(key); }
+  // read-modify-write ops run one at a time, so two quick edits (e.g. a select then a text field) never overwrite each other
+  _q = Promise.resolve(); _lock(fn) { const run = this._q.then(fn, fn); this._q = run.catch(() => {}); return run; }
   async _save(rec) { rec.updated = Date.now(); await this.b.put('t:' + rec.key, rec); this.dispatchEvent(new CustomEvent('change', { detail: rec.key })); return rec; }
   async setRating(key, n) { const r = await this.get(key); r.rating = Math.max(0, Math.min(5, Math.round(n * 2) / 2)); return this._save(r); }   // half stars
   async setTags(key, tags) { const r = await this.get(key); r.tags = [...new Set(tags.map(s => s.trim()).filter(Boolean))]; return this._save(r); }
-  async setProvenance(key, p) { const r = await this.get(key); r.provenance = p && { kind: PROVENANCE_KINDS.includes(p.kind) ? p.kind : 'other', date: p.date || '', device: p.device || '', venue: p.venue || '', source: p.source || '', note: p.note || '' }; return this._save(r); }
+  async _setProv(key, p) { const r = await this.get(key); r.provenance = p && { kind: PROVENANCE_KINDS.includes(p.kind) ? p.kind : 'other', date: p.date || '', device: p.device || '', venue: p.venue || '', source: p.source || '', note: p.note || '' }; return this._save(r); }
+  async patchProvenance(key, patch) { const r = await this.get(key); return this._setProv(key, { ...(r.provenance || { kind: 'other' }), ...patch }); }
+  setProvenance(key, p) { return this._setProv(key, p); }   // merges against what is stored, not a stale view
   async setFingerprint(key, fp) { const r = await this.get(key); r.fingerprint = fp; return this._save(r); }
   // A note with `at` (seconds) lives on the timeline; with `to` it covers a range; without either it is a note on the whole recording.
   async addNote(key, { text, at = null, to = null, kind = 'note' }) { const r = await this.get(key), n = { id: uid(), text, at, to, kind, created: Date.now() }; r.notes.push(n); await this._save(r); return n; }
@@ -47,6 +51,8 @@ export class NotesStore extends EventTarget {
   async playlists() { return (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value).sort((a, b) => a.name.localeCompare(b.name)); }
   async deletePlaylist(id) { await this.b.del('p:' + id); }
 }
+
+for (const n of ['setRating', 'setTags', 'setProvenance', 'patchProvenance', 'setFingerprint', 'addNote', 'editNote', 'removeNote']) { const f = NotesStore.prototype[n]; NotesStore.prototype[n] = function (...a) { return this._lock(() => f.apply(this, a)); }; }
 
 // ---- M3U / M3U8 (the interchange format every other player speaks)
 export function toM3U(name, tracks, { relativeTo = '' } = {}) {

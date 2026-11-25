@@ -99,3 +99,22 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: #222a44; border: 1px solid #3a4590; padding: 9px 16px; border-radius: 10px; z-index: 50; } .toast.bad { background: #3a1820; border-color: #7a2c3a; color: #ffd0d6; }
 body.drop::after { content: "Drop music or a folder to add it"; position: fixed; inset: 10px; border: 2px dashed var(--accent); border-radius: 16px; background: rgba(13,15,23,.8); display: grid; place-items: center; font-size: 18px; z-index: 40; pointer-events: none; }
 @media (max-width: 900px) { .nowgrid { grid-template-columns: 1fr; } .side { width: 140px; } .bar { grid-template-columns: 1fr; height: auto; padding: 8px 12px; } }
+
+/* notes, ratings, playlists */
+.stars { display: inline-flex; } .star { background: none; border: 0; padding: 0 1px; font-size: 16px; line-height: 1; color: #39405c; cursor: pointer; position: relative; }
+.star.full { color: #ffc857; } .star.half { color: transparent; background: linear-gradient(90deg, #ffc857 50%, #39405c 50%); -webkit-background-clip: text; background-clip: text; } .star:hover { color: #ffd98a; }
+.np { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .npl { display: flex; gap: 10px; align-items: center; cursor: pointer; min-width: 0; } #npStars .star { font-size: 13px; }
+.seekwrap { position: relative; flex: 1; display: flex; align-items: center; } .seekwrap input { width: 100%; }
+.marks { position: absolute; left: 0; right: 0; bottom: -2px; height: 6px; pointer-events: none; } .mark { position: absolute; pointer-events: auto; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--accent2); border: 0; padding: 0; cursor: pointer; }
+.mark.range { border-radius: 2px; height: 4px; margin-left: 0; background: #ff5fd288; }
+.notes { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; } .notes h4 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.np-top { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; } .lbl { font-size: 11px; color: var(--muted); margin-bottom: 2px; } .grow { flex: 1; min-width: 200px; }
+.f { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); } .f input, .f select { font-size: 13px; color: var(--ink); }
+.prov { margin: 10px 0; } .prov summary { cursor: pointer; color: var(--accent); font-size: 12px; } .provgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; margin-top: 8px; }
+textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font: inherit; resize: vertical; }
+.composer { margin: 10px 0; } .cbtns { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.notelist { display: flex; flex-direction: column; gap: 6px; } .note { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; background: var(--panel2); border-radius: 8px; } .ntext { flex: 1; white-space: pre-wrap; } .nacts { display: flex; gap: 4px; }
+.chip { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); margin-right: 4px; border: 0; } button.chip.time { color: var(--accent2); cursor: pointer; font-family: var(--mono); background: #2a1d33; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; } .toolbar input[type=search], .toolbar input:not([type]) { flex: 1; min-width: 200px; }
+.ncard { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; } .nc-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .nc-prov, .nc-note { font-size: 12px; color: var(--muted); }
+.side-foot { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }

@@ -6,6 +6,7 @@ await a.setProvenance(k, { kind: 'vinyl-rip', date: '2026-03-02', device: 'Techn
 await a.addNote(k, { text: 'crackle here', at: 61.5 }); const n2 = await a.addNote(k, { text: 'whole album story', }); await a.addNote(k, { text: 'solo', at: 10, to: 40 });
 t('timeline is ordered and excludes whole-recording notes', (await a.timeline(k)).map(n => n.at).join() === '10,61.5');
 t('find by text across notes and provenance', (await a.find({ text: 'technics' })).length === 1 && (await a.find({ minRating: 5 })).length === 0 && (await a.find({ tag: 'rip' })).length === 1);
+await a.patchProvenance(k, { venue: 'Basement' }); t('patching provenance keeps the other fields', (await a.get(k)).provenance.device.startsWith('Technics') && (await a.get(k)).provenance.venue === 'Basement');
 const doc = JSON.parse(JSON.stringify(await a.export())), b = new NotesStore(); const r1 = await b.import(doc); t('export → import into an empty store', r1.added === 1 && (await b.get(k)).notes.length === 3);
 await b.addNote(k, { text: 'from the other device', at: 99 }); await a.import(await b.export()); t('merge unions notes from both sides without duplicates', (await a.get(k)).notes.length === 4 && (await a.import(await b.export()), (await a.get(k)).notes.length === 4));
 let threw = false; try { await a.import({ format: 'x' }); } catch { threw = true; } t('rejects foreign files', threw);

@@ -4,6 +4,7 @@ import { Library } from '/lib/library.js';
 import { Player } from '/lib/player.js';
 import { VizHost } from '/lib/viz.js';
 import { h } from '/lib/controls.js';
+import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
 import { AUDIO_RE, sourcesFromFiles, webSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -143,13 +144,20 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
   else if (e.key === 'ArrowRight') { e.shiftKey ? player.next() : player.seek(player.pos() + 5); } else if (e.key === 'ArrowLeft') { e.shiftKey ? player.prev() : player.seek(player.pos() - 5); }
   else if (e.key === 'ArrowUp') { vol.value = Math.min(1, +vol.value + 0.05); vol.oninput(); } else if (e.key === 'ArrowDown') { vol.value = Math.max(0, +vol.value - 0.05); vol.oninput(); }
-  else if (e.key === 'f' && view === 'now') viz.fullscreen();
+  else if (e.key === 'f' && view === 'now') viz.fullscreen(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
 });
+
+// ------------------------------------------------------------------ notes, ratings, playlists
+async function saveText(name, text, mime) {
+  if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
+}
+const notes = initNotes({ player, lib, h, fmt, toast, show, saveText, $ });
 
 // ------------------------------------------------------------------ start
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
   await viz.init(); updateBar(); renderAll();
   if (TAURI) for (const dir of store.get('roots', [])) { try { await lib.add(await scanFolderTauri(dir)); } catch (e) { console.warn('could not rescan', dir, e); } }
-  window.__bootleg = { lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();
