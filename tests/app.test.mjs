@@ -35,7 +35,7 @@ try {
   await pg.click('.nav[data-view="albums"]'); await pg.waitForSelector('#albumGrid .card'); t('albums view shows 2 albums with cover art from the tags', (await pg.locator('#albumGrid .card').count()) === 2 && (await pg.locator('#albumGrid .card img.cover').count()) === 2);
   if (shots) await pg.screenshot({ path: path.join(shots, 'albums.png') });
   await pg.click('.nav[data-view="renders"]'); t('renders view lists the stem render with its stem count', (await pg.locator('#renderList .rcard').innerText()).includes('5 stems'));
-  await pg.click('.nav[data-view="tracks"]'); await pg.fill('#search', 'ünï'); await pg.waitForFunction(() => document.querySelectorAll('#trackList .row').length === 1 && document.querySelector('#trackList .row').textContent.includes('Caf')); const sr = await pg.locator('#trackList .row').innerText(); t('search narrows the list (substring, case-insensitive)', sr.includes('Caf'), JSON.stringify(sr)); await pg.fill('#search', '');
+  await pg.click('.nav[data-view="tracks"]'); await pg.fill('#search', 'ünï'); await pg.waitForFunction(() => document.querySelectorAll('#trackList .row').length === 1 && document.querySelector('#trackList .row').textContent.includes('Caf')); const sr = await pg.locator('#trackList .row').textContent(); t('search narrows the list (substring, case-insensitive)', sr.includes('Caf'), JSON.stringify(sr)); await pg.fill('#search', '');
   await pg.waitForFunction(() => document.querySelectorAll('#trackList .row').length === 3);
   if (shots) await pg.screenshot({ path: path.join(shots, 'tracks.png') });
 
