@@ -4,6 +4,11 @@
 export const BRIDGE_URL = 'ws://127.0.0.1:8899/bootleg';
 
 const clamp01 = v => Math.max(0, Math.min(1, v));
+const byte = v => Math.round(clamp01(v || 0) * 255);
+// numbers 0..1 -> bytes -> base64 (a frame carries ~250 of them, 25 times a second); wave is -1..1 so it is shifted into range
+const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); };
+export const packBands = a => b64(Uint8Array.from(a, byte));
+export const packWave = a => b64(Uint8Array.from(a, v => byte((v + 1) / 2)));
 
 export class Bridge {
   constructor({ player, viz, url = BRIDGE_URL }) {
@@ -32,8 +37,8 @@ export class Bridge {
     const p = this.player, it = p.item, st = p.mode === 'deck' ? p.deck.stems : [];
     return {
       type: 'state', playing: p.playing, pos: p.pos(), dur: p.dur(), volume: p.volume, shuffle: p.shuffle, repeat: p.repeat, index: p.index, count: p.queue.length,
-      track: it ? { id: it.id, title: it.title || '', artist: it.artist || '', album: it.album || '', kind: it.kind, bpm: it.bpm || null, key: it.key || '' } : null,
-      stems: st.map(s => ({ name: s.name, role: s.role || '', mute: !!s.mute, solo: !!s.solo })), stemsState: p.stemsState, pack: this.viz.pack?.name || '',
+      track: it ? { id: it.id, title: it.title || '', artist: it.artist || '', album: it.album || '', kind: it.kind, bpm: it.bpm || null, key: it.key || '', year: it.year || '', sections: it.sections || [] } : null,
+      stems: st.map(s => ({ name: s.name, role: s.role || '', mute: !!s.mute, solo: !!s.solo })), stemsState: p.stemsState, pack: this.viz.pack?.name || '', packId: this.viz.pack?.id || '',
     };
   }
   sendState(force) {
@@ -74,9 +79,10 @@ export class Bridge {
   _frames(on) {
     this.frames = on; if (on && !this.off) this.off = this.viz.onFrame(A => this._frame(A)); else if (!on && this.off) { this.off(); this.off = null; }
   }
+  // one analysed audio frame in the shape packs expect, compacted: spectrum/wave as base64 bytes, scalars as bytes, stems with 16 bands each
   _frame(A) {
-    const now = performance.now(); if (now - this.lastFrame < 45 || !A.spectrum) return; this.lastFrame = now;
-    const spec = Array.from(A.spectrum, v => Math.round(clamp01(v) * 255)), stems = (A.stems || []).map(s => Math.round(clamp01(s.level || 0) * 255));
-    this._send({ type: 'frame', spec, level: Math.round(clamp01(A.level || 0) * 255), beat: A.beat ? 1 : 0, stems });
+    const now = performance.now(); if (now - this.lastFrame < 38 || !A.spectrum) return; this.lastFrame = now;
+    const stems = (A.stems || []).map(x => ({ n: x.name, r: x.role, l: byte(x.level), b: byte(x.beat), s: packBands(x.spectrum || []), g: +(x.gainDb || 0).toFixed(1), m: x.muted ? 1 : 0, a: x.audible === false ? 0 : 1, lb: x.label || '', k: x.kit || '' }));
+    this._send({ type: 'frame', t: +(A.t || 0).toFixed(3), s: packBands(A.spectrum), w: A.wave ? packWave(A.wave) : '', f: [A.bass, A.mid, A.high, A.beat, A.level].map(byte), stems });
   }
 }
