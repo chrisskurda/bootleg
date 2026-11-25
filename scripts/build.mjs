@@ -9,6 +9,10 @@ for (const d of ['core', 'packs']) fs.cpSync(path.join(VIS, d), path.join(dist, 
 fs.copyFileSync(path.join(VIS, 'LICENSE'), path.join(dist, 'vendor/bootleg-vizualizer/LICENSE'));
 const packs = fs.readdirSync(path.join(VIS, 'packs')).filter(n => fs.existsSync(path.join(VIS, 'packs', n, 'pack.json'))).map(n => { const m = JSON.parse(fs.readFileSync(path.join(VIS, 'packs', n, 'pack.json'), 'utf8')); return { id: n, ...m, page: m.page || 'index.html' }; });
 fs.writeFileSync(path.join(dist, 'packs.json'), JSON.stringify(packs));
+// extensions: optional add-ons in extensions/<id>/ (extension.json + an ES module). Listed in extensions.json; loaded only when enabled.
+const extList = []; const extSrc = path.join(root, 'extensions');
+if (fs.existsSync(extSrc)) for (const id of fs.readdirSync(extSrc)) { const mf = path.join(extSrc, id, 'extension.json'); if (!fs.existsSync(mf)) continue; const m = JSON.parse(fs.readFileSync(mf, 'utf8')); fs.cpSync(path.join(extSrc, id), path.join(dist, 'extensions', id), { recursive: true, filter: s => !s.endsWith('.test.mjs') }); extList.push({ ...m, id: m.id || id, entry: `/extensions/${id}/${m.entry || 'index.js'}` }); }
+fs.writeFileSync(path.join(dist, 'extensions.json'), JSON.stringify(extList));
 // build stamp (shown in Settings): which commit this build is
 import { execSync } from 'node:child_process';
 let commit = process.env.GITHUB_SHA?.slice(0, 7) || ''; try { commit ||= execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { /* not a git checkout */ }

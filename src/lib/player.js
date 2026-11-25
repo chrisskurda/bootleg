@@ -6,7 +6,7 @@ export class Player extends EventTarget {
   constructor(feed) {
     super(); this.feed = feed; feed._init();
     this.audio = new Audio(); this.audio.crossOrigin = 'anonymous'; this.audio.preload = 'auto'; this.deck = new StemDeck(feed);
-    this.mode = 'element'; this.stemsState = 'none'; this.stemPolicy = 'visualizer'; this.hooks = {}; this.queue = []; this.index = -1; this.order = []; this.shuffle = false; this.repeat = 'off'; this.loading = null;
+    this.mode = 'element'; this._tok = 0; this._wantPlay = false; this.lastError = ''; this.stemsState = 'none'; this.stemPolicy = 'visualizer'; this.hooks = {}; this.queue = []; this.index = -1; this.order = []; this.shuffle = false; this.repeat = 'off'; this.loading = null;
     this.volume = Number(localStorage.getItem('bootleg.volume') ?? 0.9); this.setVolume(this.volume);
     feed.fromElement(this.audio);
     for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange']) this.audio.addEventListener(ev, () => this._emit());
@@ -68,15 +68,23 @@ export class Player extends EventTarget {
     const ctx = this.feed.ctx; if (!ctx) return; const node = this.mode === 'deck' ? this.deck.master : this.audio._mes; if (!node) return;
     try { if (this.localOut === false) node.disconnect(ctx.destination); else { node.disconnect(ctx.destination); node.connect(ctx.destination); } } catch { /* not connected */ }
   }
-  // Some webviews (WebKitGTK/GStreamer) cannot stream media from the custom asset:// scheme. If the element rejects the URL,
-  // fetch the file once (the asset protocol does allow that) and play it from a blob: URL instead.
+  // Some webviews cannot play a stream the element is pointed at (WebKitGTK/GStreamer and asset://, cross-origin servers without
+  // CORS, ...). When the element errors — or goes silent for too long — fetch the file ourselves (the asset protocol / the desktop
+  // HTTP plugin can) and play it from a blob: URL. This never blocks playback from starting: the element is tried first, at once.
   async _setSrc(src) {
-    const cur = this.item, item = { src }, a = this.audio; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
-    a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
-    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { const r = await (item.src.fetch ? item.src.fetch() : fetch(item.src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (this.item === cur) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
+    const a = this.audio, tok = ++this._tok, cur = this.item; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
+    clearTimeout(this._dog); a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
+    const fallback = async why => {
+      if (tok !== this._tok || this._blob || this.item !== cur) return;
+      try { const r = await (src.fetch ? src.fetch() : fetch(src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (tok === this._tok) { a.src = this._blob; if (this._wantPlay) a.play().catch(() => {}); } }
+      catch (e) { this._fail(`Could not play “${cur?.title || src.name}”: ${why}${e && e.message ? ' (' + e.message + ')' : ''}`); }
+    };
+    a.addEventListener('error', () => fallback(a.error ? `the player rejected it (code ${a.error.code})` : 'load error'), { once: true });
+    this._dog = setTimeout(() => { if (tok === this._tok && this._wantPlay && a.readyState < 2 && !this._blob) fallback('it did not start loading'); }, 7000);     // silent stall (no error event)
   }
-  play() { this.feed.ctx.resume(); if (this.mode === 'deck') this.deck.play(); else this.audio.play().catch(() => {}); this._emit(); }
-  pause() { if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }
+  _fail(msg) { this.lastError = msg; this.dispatchEvent(new CustomEvent('playerror', { detail: msg })); }
+  play() { this._wantPlay = true; this.feed.ctx.resume(); if (this.mode === 'deck') this.deck.play(); else this.audio.play().catch(e => { if (e && e.name !== 'AbortError' && !this._blob && e.name !== 'NotSupportedError') this._fail(`Playback was blocked: ${e.message || e.name}`); }); this._emit(); }
+  pause() { this._wantPlay = false; if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }
   toggle() { this.playing ? this.pause() : this.play(); }
   stop() { this.deck.pause(); this.audio.pause(); this._emit(); }
   seek(t) { if (this.mode === 'deck') this.deck.seek(t); else this.audio.currentTime = Math.max(0, t); this.dispatchEvent(new CustomEvent('seek', { detail: Math.max(0, t) })); this._emit(); }

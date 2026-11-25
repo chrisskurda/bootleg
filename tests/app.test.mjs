@@ -169,6 +169,17 @@ try {
   await pg.click('#settingsBody button:has-text("Clear cache")'); await sleep(400); t('Clear cache empties it', (await ev(async () => (await window.__bootleg.cache.stats()).files)) === 0);
   await pg.click('.nav[data-view="tracks"]');
 
+  // ---- extensions: the Car Thing bridge is an optional add-on (a fake bridgething app is played by Playwright)
+  await pg.click('.nav[data-view="settings"]'); await pg.waitForSelector('#settingsBody .srow'); const bridgeRow = pg.locator('#settingsBody .srow', { hasText: 'Car Thing bridge' });
+  t('extensions are listed in Settings and every one starts OFF', (await bridgeRow.count()) === 1 && !(await bridgeRow.locator('input').isChecked()) && (await ev(() => window.__bootleg.extensions.running.size)) === 0);
+  const got = []; let wsConn = null; await pg.routeWebSocket('ws://127.0.0.1:8899/bootleg', ws => { wsConn = ws; ws.onMessage(m => got.push(JSON.parse(m))); });
+  await bridgeRow.locator('input').check(); await pg.waitForFunction(() => window.__bootleg.extensions.running.has('bridge-thing'), null, { timeout: 8000 }); await sleep(600);
+  t('turning it on connects to the bridgething app and publishes player state', got.some(m => m.type === 'state' && 'playing' in m && 'volume' in m), JSON.stringify(got[0] || {}).slice(0, 120));
+  wsConn.send(JSON.stringify({ cmd: 'volume', to: 0.33 })); await pg.waitForFunction(() => Math.abs(window.__bootleg.player.volume - 0.33) < 0.001); t('commands from the device drive the player', true);
+  wsConn.send(JSON.stringify({ cmd: 'frames', on: true })); await sleep(900); t('the device can subscribe to spectrum frames (the extension taps the visualizer through the API)', got.some(m => m.type === 'frame' && m.spec.length === 64) && (await ev(() => window.__bootleg.viz.taps.size)) === 1);
+  await pg.locator('#settingsBody .srow', { hasText: 'Car Thing bridge' }).locator('input').uncheck(); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('bridge-thing')); t('turning it off detaches it completely (no leftover frame tap)', (await ev(() => window.__bootleg.viz.taps.size)) === 0);
+  await ev(() => window.__bootleg.player.setVolume(0.9));
+
   // ---- progress while importing a big folder
   const big = path.join(tmp, 'Big'); fs.mkdirSync(big); ff('-f', 'lavfi', '-i', 'sine=frequency=500:duration=1', path.join(tmp, 'one.wav')); for (let i = 0; i < 1500; i++) fs.copyFileSync(path.join(tmp, 'one.wav'), path.join(big, `bulk ${String(i).padStart(4, '0')}.wav`));
   await pg.evaluate(() => { window.__sawProgress = []; const el = document.getElementById('progress'); new MutationObserver(() => { if (!el.hidden) window.__sawProgress.push(document.getElementById('ptext').textContent); }).observe(el, { attributes: true, childList: true, subtree: true, characterData: true }); });
@@ -229,7 +240,11 @@ try {
   mock.state.songs.push(song('s4', 'Fresh Upload', 'Other Album', 'al2', 2)); mock.state.songs = mock.state.songs.filter(x => x.id !== 's2');
   await ev(() => window.__bootleg.syncAll()); await pg.waitForFunction(() => window.__bootleg.lib.tracks.length === 3 && window.__bootleg.lib.tracks.some(x => x.title === 'Fresh Upload') && !window.__bootleg.lib.tracks.some(x => x.title === 'Remote Two'), null, { timeout: 15000 });
   t('"check for changes" picks up a new upload and a removed track on the server', true);
+  mock.state.failStream = true; await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row', { hasText: 'Fresh Upload' }).dblclick(); await pg.waitForSelector('.toast.bad', { timeout: 15000 });
+  t('when a server track cannot be played, the user is told why (never silent)', /Could not play .*Fresh Upload/.test(await pg.locator('.toast.bad').first().innerText()), await pg.locator('.toast.bad').first().innerText());
+  mock.state.failStream = false;
   mock.close();
-  t('no console or page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  const realErrs = errs.filter(e => !/status of 500.*stream\.view/.test(e));      // the deliberate failing stream above
+  t('no console or page errors', realErrs.length === 0, realErrs.slice(0, 3).join(' | '));
 } catch (e) { t('test run completed without throwing', false, String(e.message).split('\n')[0]); if (shots) await pg.screenshot({ path: path.join(shots, 'failure.png') }).catch(() => {}); }
 await finish();

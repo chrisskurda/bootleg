@@ -13,10 +13,11 @@ export function startMock({ user = 'alice', password = 'secret', songs, files, c
     if (m === 'ping') return json({});
     if (m === 'getAlbumList2') { const off = +q.get('offset') || 0, size = +q.get('size') || 10; return json({ albumList2: { album: albums().slice(off, off + size).map(a => ({ id: a.id, name: a.name, artist: a.artist, songCount: a.songs.length })) } }); }
     if (m === 'getAlbum') { const a = albums().find(x => x.id === q.get('id')); return a ? json({ album: { id: a.id, name: a.name, song: a.songs } }) : json({ error: { code: 70, message: 'not found' } }, 'failed'); }
+    if (m === 'stream' && state.failStream) { res.writeHead(500); return res.end('boom'); }
     if (m === 'stream') { const s = state.songs.find(x => x.id === q.get('id')); if (!s) { res.writeHead(404); return res.end(); } const buf = fs.readFileSync(files[s.id]); const range = req.headers.range; res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('content-type', 'audio/' + (s.suffix === 'flac' ? 'flac' : 'mpeg'));
       if (range) { const [a, b] = range.replace('bytes=', '').split('-'), start = +a, end = b ? +b : buf.length - 1; res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${buf.length}`, 'Content-Length': end - start + 1 }); return res.end(buf.subarray(start, end + 1)); } res.setHeader('Content-Length', buf.length); return res.end(buf); }
     if (m === 'getCoverArt') { res.setHeader('content-type', 'image/png'); return res.end(fs.readFileSync(cover)); }
     res.writeHead(404); res.end();
   });
-  return new Promise(ok => srv.listen(port, '127.0.0.1', () => ok({ url: `http://127.0.0.1:${srv.address().port}`, state, close: () => srv.close() })));
+  return new Promise(ok => srv.listen(port, process.env.HOST || '127.0.0.1', () => ok({ url: `http://${process.env.HOST || '127.0.0.1'}:${srv.address().port}`, state, close: () => srv.close() })));
 }

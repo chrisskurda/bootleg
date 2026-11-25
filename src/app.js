@@ -11,7 +11,7 @@ import { albumKey } from '/lib/album-details.js';
 import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
 import { getSource, listSources } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
-import { Bridge } from '/lib/bridge.js';
+import { Extensions } from '/lib/extensions.js';
 import { Outputs } from '/lib/outputs/manager.js';
 import { getOutput } from '/lib/outputs/index.js';
 import { readTags } from '/lib/tags.js';
@@ -24,8 +24,6 @@ const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60
 const TAURI = window.__TAURI__;
 const lib = new Library(), feed = new AudioFeed(), player = new Player(feed);
 const viz = new VizHost({ stage: $('#vizStage'), packSelect: $('#packSelect'), paramsEl: $('#packParams'), lookEl: $('#lookParams'), feed, player });
-const bridge = new Bridge({ player, viz }), bridgeOn = () => { try { return localStorage.getItem('bootleg.bridge') === '1'; } catch { return false; } };
-if (!window.__BOOTLEG_SELFTEST && bridgeOn()) bridge.start();
 function toast(msg, bad = false) { const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg); document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 3000); }
 const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test mode: the shell injects this flag, and nothing below touches the real settings, library or notes
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
@@ -238,6 +236,7 @@ function updateBar() {
   renderQueue(); if (view === 'now') { buildStems(); ensureForViz(); }
 }
 player.addEventListener('change', updateBar);
+player.addEventListener('playerror', e => toast(e.detail, true));      // never fail silently: say why nothing is playing
 let drag = false; seek.oninput = () => { drag = true; }; seek.onchange = () => { const d = player.dur(); if (d) player.seek(seek.value / 1000 * d); drag = false; };
 (function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
 playBtn.onclick = () => { if (!player.item) { if (shown.length) player.playList(shown, 0); else if (lib.renders.length) player.playList(lib.renders, 0); return; } player.toggle(); };
@@ -291,6 +290,24 @@ addEventListener('keydown', e => {
   else if (e.key === 'f' && view === 'now') viz.fullscreen(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
 });
 
+// ------------------------------------------------------------------ extensions (optional add-ons; none ship enabled)
+const extApi = id => ({
+  id, player, library: lib, toast,
+  viz: { get pack() { return viz.pack; }, get packs() { return viz.packs; }, setPack: pid => viz.setPack(pid), onFrame: cb => viz.onFrame(cb) },
+  settings: { get: (k, d) => store.get(`ext.${id}.${k}`, d), set: (k, v) => store.set(`ext.${id}.${k}`, v) },
+});
+const extensions = new Extensions({ store, api: extApi });
+extensions.addEventListener('change', () => { if (view === 'settings') paintSettings(); });
+function extensionRows() {
+  if (!extensions.list.length) return [h('div', { class: 'muted small' }, 'No extensions installed.')];
+  return extensions.list.flatMap(e => {
+    const on = extensions.enabled(e.id), st = extensions.status(e.id);
+    const rows = [h('label', { class: 'srow' }, h('span', {}, h('b', {}, e.name), h('small', {}, e.description || ''), on ? h('small', { class: extensions.error(e.id) ? 'err' : 'muted' }, extensions.error(e.id) || st || 'starting…') : ''), h('input', { type: 'checkbox', checked: on, onchange: ev => extensions.setEnabled(e.id, ev.target.checked) }))];
+    if (on) for (const f of e.settings || []) rows.push(h('label', { class: 'srow sub' }, h('span', {}, h('b', {}, f.label), f.hint ? h('small', {}, f.hint) : ''), h('input', { type: f.type === 'number' ? 'number' : 'text', value: extensions.setting(e.id, f.key, f.default), onchange: ev => extensions.setSetting(e.id, f.key, f.type === 'number' ? +ev.target.value : ev.target.value) })));
+    return rows;
+  });
+}
+
 // ------------------------------------------------------------------ settings
 // Connect a library to a source plugin (Subsonic, …): the form is built from the plugin's declared fields.
 const formOpen = new Set();
@@ -338,8 +355,7 @@ async function paintSettings() {
     h('h3', {}, '.nfo files'),
     row('Read .nfo files', 'album.nfo / artist.nfo (Kodi style) and plain-text .nfo in your folders: shown with the track and searchable.', chk('useNfo')),
     row('Fill missing tags from .nfo', 'Tags in the files always win; an .nfo only supplies what is missing (album, artist, year, genre).', chk('nfoFill')),
-    h('h3', {}, 'Car Thing'),
-    row('Connect to bootleg-bridge-thing', 'Lets a Spotify Car Thing running the bootleg-bridge-thing app control playback and show the visualizer. Connects to the bridgething desktop app on this computer (127.0.0.1:8899).', h('input', { type: 'checkbox', checked: bridgeOn(), onchange: e => { try { localStorage.setItem('bootleg.bridge', e.target.checked ? '1' : '0'); } catch { /* private mode */ } e.target.checked ? bridge.start() : bridge.stop(); } })),
+    h('h3', {}, 'Extensions'), ...extensionRows(),
     h('h3', {}, 'About'),
     h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'bootleg'), h('small', {}, build ? `version ${build.version} · build ${build.commit || 'local'} · ${build.date}` : 'local build')), h('span', { class: 'muted small' }, 'MIT licensed')),
     h('h3', {}, 'Maintenance'),
@@ -436,8 +452,8 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
   applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
-  await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {})]);
+  await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {}), window.__BOOTLEG_SELFTEST ? null : extensions.init()]);
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
-  window.__bootleg = { paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

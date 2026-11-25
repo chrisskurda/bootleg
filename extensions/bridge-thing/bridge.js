@@ -1,25 +1,28 @@
-// Link to the bootleg-bridge-thing desktop extension (a Car Thing remote). We connect out to its localhost WebSocket,
+// Link to the bootleg-bridge-thing desktop app (a Car Thing remote). We connect out to its localhost WebSocket,
 // publish player state (and spectrum frames while the device is watching) and execute the commands it relays back.
+// Uses only the extension API: `player` (transport + events) and `viz` ({ pack, packs, setPack, onFrame }).
 export const BRIDGE_URL = 'ws://127.0.0.1:8899/bootleg';
 
 const clamp01 = v => Math.max(0, Math.min(1, v));
 
 export class Bridge {
   constructor({ player, viz, url = BRIDGE_URL }) {
-    Object.assign(this, { player, viz, url }); this.ws = null; this.frames = false; this.lastFrame = 0; this.coverFor = null; this.timer = null; this.sig = '';
-    player.addEventListener('change', () => this.sendState());
-    player.addEventListener('seek', () => this.sendState(true));
-    setInterval(() => { if (this.open && player.playing) this.sendState(true); }, 1000);   // keep the device's playhead honest
+    Object.assign(this, { player, viz, url }); this.ws = null; this.frames = false; this.lastFrame = -Infinity; this.coverFor = null; this.timer = null; this.sig = ''; this.off = null;
+    this._onChange = () => this.sendState(); this._onSeek = () => this.sendState(true);
+    player.addEventListener('change', this._onChange); player.addEventListener('seek', this._onSeek);
+    this.tick = setInterval(() => { if (this.open && player.playing) this.sendState(true); }, 1000);   // keep the device's playhead honest
   }
+  // Detach completely (the extension host calls this when the extension is turned off).
+  dispose() { this.stop(); clearInterval(this.tick); this.player.removeEventListener('change', this._onChange); this.player.removeEventListener('seek', this._onSeek); }
   get open() { return this.ws && this.ws.readyState === 1; }
   start() { if (this.ws || this.timer) return; this._connect(); }
-  stop() { clearTimeout(this.timer); this.timer = null; this.frames = false; this.viz.tap = null; try { this.ws?.close(); } catch { /* closed */ } this.ws = null; }
+  stop() { clearTimeout(this.timer); this.timer = null; this._frames(false); try { this.ws?.close(); } catch { /* closed */ } this.ws = null; }
   _connect() {
     this.timer = null; let ws; try { ws = new WebSocket(this.url); } catch { this._retry(); return; }
     this.ws = ws;
     ws.onopen = () => { this.sig = ''; this.coverFor = null; this.sendState(true); };
     ws.onmessage = e => { try { this._cmd(JSON.parse(e.data)); } catch { /* malformed */ } };
-    ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.frames = false; this.viz.tap = null; this._retry(); } };
+    ws.onclose = () => { if (this.ws === ws) { this.ws = null; this._frames(false); this._retry(); } };
     ws.onerror = () => { /* onclose follows */ };
   }
   _retry() { if (!this.timer) this.timer = setTimeout(() => this._connect(), 3000); }
@@ -69,7 +72,7 @@ export class Bridge {
   }
   _pack(by) { const v = this.viz, n = v.packs.length; if (!n || !by) return; const i = Math.max(0, v.packs.indexOf(v.pack)); v.setPack(v.packs[(i + by + n) % n].id); this.sendState(true); }
   _frames(on) {
-    this.frames = on; this.viz.tap = on ? A => this._frame(A) : null; if (on) this.viz._kick();
+    this.frames = on; if (on && !this.off) this.off = this.viz.onFrame(A => this._frame(A)); else if (!on && this.off) { this.off(); this.off = null; }
   }
   _frame(A) {
     const now = performance.now(); if (now - this.lastFrame < 45 || !A.spectrum) return; this.lastFrame = now;

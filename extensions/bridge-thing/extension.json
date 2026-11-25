@@ -1,0 +1,16 @@
+{
+  "id": "bridge-thing",
+  "name": "Car Thing bridge",
+  "version": "0.1.0",
+  "entry": "index.js",
+  "description": "Lets a Spotify Car Thing running the bootleg-bridge-thing app control playback and show the visualizer. Connects to the bridgething desktop app on this computer.",
+  "settings": [
+    {
+      "key": "url",
+      "label": "Bridge address",
+      "type": "text",
+      "default": "ws://127.0.0.1:8899/bootleg",
+      "hint": "Where the bridgething desktop app listens."
+    }
+  ]
+}
