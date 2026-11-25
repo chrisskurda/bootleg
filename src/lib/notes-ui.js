@@ -17,7 +17,7 @@ export function stars(h, value, onset) {
 }
 
 export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $ }) {
-  let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
+  const drafts = new Map(); let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
   libs.onchange = () => paint();
   const refresh = async () => { curKey = trackKey(player.item); cur = curKey ? await store.get(curKey) : null; paint(); paintMarks(); paintBarStars(); };
@@ -44,7 +44,9 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
     const field = (k, label, ph, type = 'text') => h('label', { class: 'f' }, h('span', {}, label), h('input', { type, value: pv[k] || '', placeholder: ph, onchange: e => store.patchProvenance(curKey, { [k]: e.target.value }) }));
     const ta = h('textarea', { id: 'noteText', rows: 2, placeholder: 'A note about this moment, or the whole recording…  (Cmd/Ctrl+Enter to add)' });
     const kindSel = h('select', { id: 'noteKind', title: 'What kind of note' }, ...mode.noteKinds.map(([k, l]) => h('option', { value: k }, l)));
-    const add = async (at, to) => { const text = ta.value.trim(); if (!text) { ta.focus(); return; } await store.addNote(curKey, { text, at, to, kind: kindSel.value }); ta.value = ''; rangeFrom = null; };
+    const d = drafts.get(curKey) || { text: '', kind: '' };      // an unsent note survives the panel repainting after a rating/status/tag change
+    ta.value = d.text; if (d.kind && mode.noteKinds.some(k => k[0] === d.kind)) kindSel.value = d.kind; ta.oninput = () => drafts.set(curKey, { text: ta.value, kind: kindSel.value }); kindSel.onchange = () => drafts.set(curKey, { text: ta.value, kind: kindSel.value });
+    const add = async (at, to) => { const text = ta.value.trim(); if (!text) { ta.focus(); return; } drafts.delete(curKey); await store.addNote(curKey, { text, at, to, kind: kindSel.value }); ta.value = ''; rangeFrom = null; };
     ta.onkeydown = e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') add(player.pos()); };
     const list = [...cur.notes].sort((a, b) => (a.at ?? -1) - (b.at ?? -1) || a.created - b.created).map(n => noteRow(n));
     p.replaceChildren(
@@ -95,6 +97,7 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
   // ---- Notes browser: everything annotated, across the library
   const byKey = () => { const m = new Map(); for (const t of [...lib.tracks, ...lib.renders]) m.set(trackKey(t), t); for (const a of lib.albums()) m.set(albumKey(a), { title: a.album, artist: a.artist, album: 'album', tracks: a.tracks, isAlbum: true }); return m; };
   async function paintLists() {
+    if ($('#view-notes').hidden && $('#view-playlists').hidden) return;       // repainted when those views open (keeps big libraries cheap)
     const q = $('#noteSearch').value, minR = +$('#noteMin').value, tag = $('#noteTag').value, status = $('#noteStatus').value, recs = await store.find({ minRating: minR, text: q || undefined, tag: tag || undefined, status: status || undefined }), keys = byKey();
     const tags = await store.allTags(), tsel = $('#noteTag'); if (tsel.options.length !== tags.length + 1 || [...tsel.options].slice(1).some((o, i) => o.value !== tags[i][0])) { tsel.replaceChildren(h('option', { value: '' }, 'any tag'), ...tags.map(([g, n]) => h('option', { value: g, selected: g === tag }, `${g} (${n})`))); }
     const rows = recs.filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated).map(r => {

@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Tests (tags, notes, nfo, libraries, browser end-to-end)
         run: npm test
+      - name: Performance budget (20,000 tracks, CPU throttled 4×)
+        run: npm run perf
       - name: Browser screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4

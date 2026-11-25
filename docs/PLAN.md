@@ -69,3 +69,20 @@ Subsonic/OpenSubsonic is the first **library source plugin** and the template fo
 ## Albums, details, CI (v0.5)
 - **Album views:** grid, list, cover flow (persistent compositor-animated covers; reflection only on the centre cover, no `box-reflect`), and **split** — album list left, right pane with cover, details **merged from every source with a chip saying where each fact came from** (tags / server / .nfo / files / library), review and artist text from .nfo, album-level rating/tags/notes (keyed `album:Artist|Album`, shared across libraries), tracks. Metadata plugins (MusicBrainz, Last.fm, …) will contribute more candidate facts to the same merge (`src/lib/album-details.js`) — a second plugin kind next to source plugins.
 - **CI (`.github/workflows/build.yml`):** every push/PR runs the tests, builds the macOS arm64 app and Linux x64 (.deb + AppImage), runs `scripts/selftest.sh` on each built binary (scan, tags, playback, stems, cache, notes, Subsonic), and uploads artifacts named by commit; tags `v*` attach builds to a release. Works on GitHub Actions; Gitea/Forgejo Actions can run the same file with matching runner labels. The build stamp (commit/date) shows in Settings → About.
+
+## Performance (v0.6)
+Measured with `npm run perf` (20,000 synthetic tracks, CPU throttled 4× to imitate a weaker machine; CI enforces the budgets) and the desktop self-test on a 30,000-file library:
+
+| | before | after |
+|---|---|---|
+| DOM nodes with 20k tracks | 220,000 | ~600 |
+| first track rows (throttled) | 1,364 ms | ~290 ms |
+| switching back to Tracks (throttled) | 1,080 ms | ~10 ms |
+| search keystroke (throttled) | 287 ms | ~15 ms |
+| longest UI-blocking task (throttled) | 627 ms | ~80 ms |
+| folder scan, 30k files | seconds (one IPC call per file) | 90 ms (Rust, parallel) |
+| first import tag reading, 30k files | 24.8 s | 2.3 s (native `lofty`, batched, threaded) |
+| start from cache, 30k tracks | — | 0.4 s (loaded in slices) |
+
+What changed: virtualized lists (tracks, album list, split list; grid renders in chunks), memoized sort/albums/search keyed by a data version, adaptive redraw throttle while tags stream in, lazy `convertFileSrc`, the cache loads in chunks after the first paint, the visualizer pack page loads only when first shown, hidden views don't repaint, Rust scanner + Rust tag reader. The page-side tag reader remains for the web build and as the fallback for formats lofty can't read.
+Not done yet: queue and Notes cards aren't virtualized; web build still reads tags on the main thread (a Worker would help); tag/cover reading could be prioritised for what is on screen.

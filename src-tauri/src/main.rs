@@ -7,6 +7,8 @@
 
 use std::{env, fs, path::PathBuf};
 mod dlna;
+mod scan;
+mod tags;
 mod lan;
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -25,6 +27,22 @@ fn allow_path(app: AppHandle, path: String) -> Result<(), String> {
         files.allow_file(&p).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Walks an allowed folder in Rust and returns its audio/.nfo/manifest files with size + mtime (ms). Progress goes to `on_progress`.
+#[tauri::command]
+async fn scan_dir(app: AppHandle, path: String, on_progress: tauri::ipc::Channel<scan::Progress>) -> Result<Vec<scan::Entry>, String> {
+    let root = PathBuf::from(&path);
+    if !app.asset_protocol_scope().is_allowed(&root) { return Err("that folder has not been opened in bootleg".into()); }
+    tauri::async_runtime::spawn_blocking(move || scan::scan(&root, |p| { let _ = on_progress.send(p); })).await.map_err(|e| e.to_string())
+}
+
+/// Reads tags for many files at once (native, threaded). Only files inside the allowed library folders are read.
+#[tauri::command]
+async fn read_tags_batch(app: AppHandle, paths: Vec<String>, known_covers: Vec<String>) -> Result<tags::Batch, String> {
+    let scope = app.asset_protocol_scope();
+    if let Some(bad) = paths.iter().find(|p| !scope.is_allowed(PathBuf::from(p))) { return Err(format!("not an opened file: {bad}")); }
+    tauri::async_runtime::spawn_blocking(move || tags::read_batch(paths, known_covers)).await.map_err(|e| e.to_string())
 }
 
 // ---- cast / network outputs ----------------------------------------------------------------------------------------
@@ -104,7 +122,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .setup(|app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);

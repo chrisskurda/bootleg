@@ -12,7 +12,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs && node scripts/serve.mjs",
-    "test": "node tests/tags.test.mjs && node tests/notes.test.mjs && node tests/nfo.test.mjs && node tests/libraries.test.mjs && node tests/app.test.mjs"
+    "test": "node tests/tags.test.mjs && node tests/notes.test.mjs && node tests/nfo.test.mjs && node tests/libraries.test.mjs && node tests/app.test.mjs",
+    "perf": "node tests/perf.mjs 20000 --cpu 4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.6",

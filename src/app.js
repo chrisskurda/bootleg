@@ -5,6 +5,7 @@ import { Player } from '/lib/player.js';
 import { VizHost } from '/lib/viz.js';
 import { h } from '/lib/controls.js';
 import { MemoryBackend } from '/lib/notes.js';
+import { VirtualList } from '/lib/vlist.js';
 import { albumPane } from '/lib/album-pane.js';
 import { albumKey } from '/lib/album-details.js';
 import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
@@ -12,9 +13,10 @@ import { getSource, listSources } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
 import { Outputs } from '/lib/outputs/manager.js';
 import { getOutput } from '/lib/outputs/index.js';
+import { readTags } from '/lib/tags.js';
 import { Libraries, MODES } from '/lib/libraries.js';
 import { LibCache, NullCache } from '/lib/cache.js';
-import { AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
+import { makeNativeTagReader, AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -29,7 +31,7 @@ const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d),
 let view = 'tracks';
 function show(v) {
   view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v));
-  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') buildStems(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } renderAll();
+  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') buildStems(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } renderAll();
 }
 $$('.nav').forEach(b => b.onclick = () => show(b.dataset.view)); $('#np').onclick = () => show('now');
 
@@ -42,12 +44,15 @@ function trackRow(t, i) {
     h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
     h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
+const trackVL = new VirtualList({ scroller: $('#view-tracks'), container: $('#trackList'), rowH: 38, render: (t, i) => trackRow(t, i) });
 function renderTracks() {
-  shown = lib.search(lib.sortedTracks(), $('#search').value); const list = $('#trackList'); list.replaceChildren(...shown.map(trackRow));
+  const next = lib.search(lib.sortedTracks(), $('#search').value); if (next !== shown) { shown = next; trackVL.setItems(shown); } else trackVL.schedule();
   $('#emptyTracks').hidden = lib.visibleTracks.length > 0; $('.thead').hidden = !lib.visibleTracks.length;
 }
 // ---- albums: grid / list / cover flow
-let flowIdx = 0, openKey = null;
+let flowIdx = 0, openKey = null, listShown = null, gridLimit = 300;
+const albumVL = new VirtualList({ scroller: $('#albumList'), container: $('#albumListVc'), rowH: 52, render: a => { const i = albumInfo(a); return h('div', { class: 'arow' + (openKey === a.key ? ' sel' : ''), onclick: () => { openKey = a.key; renderAlbums(); }, ondblclick: () => player.playList(a.tracks, 0) },
+  cover(a.coverUrl, 'cover sm'), h('span', { class: 'tt' }, a.album), h('span', { class: 'muted' }, a.artist || ''), h('span', { class: 'r muted' }, i.year || ''), h('span', { class: 'r muted' }, a.tracks.length), h('span', { class: 'r muted' }, i.dur ? hms(i.dur) : '')); } });
 const albumInfo = a => { const yrs = a.tracks.map(t => +t.year).filter(Boolean), dur = a.tracks.reduce((n, t) => n + (t.duration || 0), 0); return { year: yrs.length ? Math.min(...yrs) : '', dur }; };
 const hms = s => { s = Math.round(s); const hh = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return hh ? `${hh} h ${m} min` : `${m} min`; };
 function albumTracks(a) {
@@ -65,12 +70,10 @@ function renderAlbums() {
   $$('#albumMode button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode)); $('#albumGrid').hidden = mode !== 'grid'; $('#albumList').hidden = mode !== 'list'; $('#albumFlow').hidden = mode !== 'flow'; $('#albumSplit').hidden = mode !== 'split'; $('#emptyAlbums').hidden = list.length > 0;
   if (openKey && !list.some(a => a.key === openKey)) openKey = null;
   if (mode === 'split') { $('#albumDetail').hidden = true; renderSplit(list); return; }
-  if (mode === 'grid') { $('#albumDetail').hidden = true; $('#albumGrid').replaceChildren(...list.map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${a.tracks.length} tracks`)))); return; }
+  if (mode === 'grid') { $('#albumDetail').hidden = true; if (list.length > gridLimit) { $('#albumGrid').dataset.more = '1'; } else delete $('#albumGrid').dataset.more; $('#albumGrid').replaceChildren(...list.slice(0, gridLimit).map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${a.tracks.length} tracks`)))); return; }
   if (mode === 'list') {
-    $('#albumDetail').hidden = true;
-    $('#albumList').replaceChildren(h('div', { class: 'arow head' }, h('span'), h('span', {}, 'Album'), h('span', {}, 'Artist'), h('span', { class: 'r' }, 'Year'), h('span', { class: 'r' }, 'Tracks'), h('span', { class: 'r' }, 'Length')),
-      ...list.map(a => { const i = albumInfo(a), open = openKey === a.key; return h('div', { class: 'agroup' + (open ? ' open' : '') }, h('div', { class: 'arow', onclick: () => { openKey = open ? null : a.key; renderAlbums(); }, ondblclick: () => player.playList(a.tracks, 0) },
-        cover(a.coverUrl, 'cover sm'), h('span', { class: 'tt' }, a.album), h('span', { class: 'muted' }, a.artist || ''), h('span', { class: 'r muted' }, i.year || ''), h('span', { class: 'r muted' }, a.tracks.length), h('span', { class: 'r muted' }, i.dur ? hms(i.dur) : '')), open ? h('div', { class: 'aopen' }, albumActions(a), albumTracks(a)) : null); }));
+    if (!openKey) openKey = list[0]?.key; if (listShown !== list) { listShown = list; albumVL.setItems(list); } else albumVL.paint(true);
+    const cur = list.find(x => x.key === openKey), det = $('#albumDetail'); det.hidden = !cur; if (cur) det.replaceChildren(albumHead(cur), albumTracks(cur));
     return;
   }
   // cover flow: a 3D carousel around the selected album. Cover elements persist between moves so the browser animates
@@ -98,17 +101,20 @@ function renderAlbums() {
 
 // ---- split view: album list on the left; cover, merged details, album notes and tracks on the right
 let splitKey = null, splitToken = 0;
+const splitVL = new VirtualList({ scroller: $('#splitList'), container: $('#splitVc'), rowH: 54, render: a => h('div', { class: 'srow2' + (a.key === splitKey ? ' sel' : ''), onclick: () => { splitKey = a.key; splitVL.paint(true); paintSplitPane(); }, ondblclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl, 'cover sm'), h('div', { class: 'stext' }, h('div', { class: 'tt' }, a.album), h('div', { class: 'muted small' }, [a.artist, albumInfo(a).year].filter(Boolean).join(' · ')))) });
+let splitShown = null;
 function renderSplit(list) {
-  const listEl = $('#splitList'), pane = $('#splitPane'); if (!list.length) { listEl.replaceChildren(); pane.replaceChildren(); return; }
+  const pane = $('#splitPane'); if (!list.length) { splitVL.setItems([]); pane.replaceChildren(); return; }
   if (!list.some(a => a.key === splitKey)) splitKey = list[0].key;
-  listEl.replaceChildren(...list.map(a => h('div', { class: 'srow2' + (a.key === splitKey ? ' sel' : ''), onclick: () => { splitKey = a.key; renderSplit(list); }, ondblclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl, 'cover sm'), h('div', { class: 'stext' }, h('div', { class: 'tt' }, a.album), h('div', { class: 'muted small' }, [a.artist, albumInfo(a).year].filter(Boolean).join(' · '))))));
-  listEl.querySelector('.sel')?.scrollIntoView({ block: 'nearest' }); paintSplitPane(list);
+  if (splitShown !== list) { splitShown = list; splitVL.setItems(list); } else splitVL.paint(true);
+  paintSplitPane(list);
 }
 async function paintSplitPane(list = lib.albums().filter(a => { const q = $('#search').value.toLowerCase(); return !q || (a.album + ' ' + a.artist).toLowerCase().includes(q); })) {
   const a = list.find(x => x.key === splitKey); if (!a) return; const tok = ++splitToken;
   const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, trackStore: t => notes.store.get(trackKey(t)) });
   if (tok === splitToken) { const pane = $('#splitPane'), keep = pane.scrollTop; pane.replaceChildren(el); pane.scrollTop = keep; }
 }
+$('#view-albums').addEventListener('scroll', () => { const v = $('#view-albums'); if (settings.albumView === 'grid' && $('#albumGrid').dataset.more && v.scrollTop + v.clientHeight > v.scrollHeight - 700) { gridLimit += 300; renderAlbums(); } }, { passive: true });
 $$('#albumMode button').forEach(b => { b.onclick = () => { settings.albumView = b.dataset.mode; applySettings(); renderAlbums(); }; });
 
 function renderRenders() {
@@ -118,17 +124,20 @@ function renderRenders() {
     h('div', { class: 'badges' }, h('span', { class: 'badge ok' }, `${r.stems.length} stems`), r.sections.length ? h('span', { class: 'badge' }, `${r.sections.length} sections`) : null, r.clips ? h('span', { class: 'badge' }, 'sample labels') : null)))));
   $('#emptyRenders').hidden = list.length > 0;
 }
+let albumCount = 0;
 function renderAll() {
-  const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length; $('#nTracks').textContent = vt || ''; $('#nRenders').textContent = vr || ''; $('#nAlbums').textContent = lib.albums().length || '';
+  const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length; $('#nTracks').textContent = vt || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
   if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders();
   const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${vt} tracks · ${vr} renders` : '';
   $('#forget').hidden = !scopeRoots().length;
 }
-let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTimer = setTimeout(() => { rTimer = 0; renderAll(); }, 250); });
-$('#search').oninput = () => renderAll();
+// while tags stream in, redraw less often (each redraw of a big library is work a weaker machine can't spare)
+let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTimer = setTimeout(() => { rTimer = 0; renderAll(); }, lib._q.length + lib._busy ? 900 : 200); });
+$('#search').oninput = () => { gridLimit = 300; renderAll(); };
 
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active;
+if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
 const DEFAULTS = { albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
@@ -171,12 +180,15 @@ $('#libSel').onchange = e => { libs.setActive(e.target.value); lib.scope = libs.
 
 // Desktop: show the whole library from the cache immediately, then look for changes in the background.
 const sessionOf = r => { const c = libs.connection(r.conn), p = getSource(r.plugin); return c && p ? p.session(c.config) : null; };
+async function loadChunked(srcs, libId) {      // shows the cached library in slices so the window stays responsive
+  scan.on = true; try { await lib.addChunked(srcs, libId, { onProgress: (n, total) => { scan.text = `Loading your library… ${n.toLocaleString()} of ${total.toLocaleString()}`; renderAll(); } }); } finally { scan.on = false; }
+}
 async function restoreFromCache() {
   for (const ix of await cache.indexes()) {
     const owner = libs.ofRoot(ix.root); if (!owner) continue;
     try {
-      if (ix.entries[0]?.remote) { lib.add(ix.entries.map(e => fromIndexEntry(e, getSource, sessionOf)).filter(Boolean), owner.id); continue; }     // a source plugin's library: no disk, no network needed
-      if (!TAURI) continue; await TAURI.core.invoke('allow_path', { path: ix.root }); lib.add(ix.entries.map(e => tauriSource(e.path, e.size, e.mtime)), owner.id);
+      if (ix.entries[0]?.remote) { await loadChunked(ix.entries.map(e => fromIndexEntry(e, getSource, sessionOf)).filter(Boolean), owner.id); continue; }     // a source plugin's library: no disk, no network needed
+      if (!TAURI) continue; await TAURI.core.invoke('allow_path', { path: ix.root }); await loadChunked(ix.entries.map(e => tauriSource(e.path, e.size, e.mtime)), owner.id);
     } catch (e) { console.warn('cached root unavailable', ix.root, e); }
   } renderAll();
 }
@@ -374,11 +386,13 @@ const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, li
 async function selfTest(dir) {
   const out = { ok: false }, wait = async (f, ms = 20000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting for ' + f); await new Promise(r => setTimeout(r, 100)); } };
   try {
-    await addSources(await scanFolderTauri(dir), 'self-test'); await wait(() => (lib.tracks.length || lib.renders.length) && lib.tracks.every(t => t.tagged));
+    const ts = performance.now(), first = await scanFolderTauri(dir); out.scanMs = Math.round(performance.now() - ts); out.scanFiles = first.length;
+    const tt = performance.now(); await addSources(first, 'self-test'); await wait(() => (lib.tracks.length || lib.renders.length) && lib.tracks.every(t => t.tagged), 180000); out.tagMs = Math.round(performance.now() - tt);
+    { const src = lib.tracks[0]?.src; if (src && lib.nativeReader) { const n = await lib.nativeReader(src.path), j = await readTags(src.reader()); out.nativeTagsMatch = !!n && ['title', 'artist', 'album', 'year', 'track'].every(k => (n[k] ?? '') == (j[k] ?? '')) && !!(n.cover || n.coverKey) === !!j.cover; if (!out.nativeTagsMatch) out.nativeVsJs = JSON.stringify([{ ...n, cover: !!n?.cover }, { ...j, cover: !!j.cover }]).slice(0, 300); } }
     out.tracks = lib.tracks.length; out.renders = lib.renders.length; out.firstTitle = lib.sortedTracks()[0]?.title; out.cover = lib.tracks.some(t => !!t.coverUrl);
     if (lib.tracks.length) { await player.playList(lib.sortedTracks(), 0); await wait(() => player.playing && player.pos() > 0.7); let peak = 0; for (let i = 0; i < 20; i++) { const A = feed.update(0.05); peak = Math.max(peak, ...A.spectrum); await new Promise(r => setTimeout(r, 50)); } out.pos = player.pos(); out.peak = peak; out.mode = player.mode; }
     if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing && player.pos() > 0.7); out.stems = player.deck.stems.length; }
-    { await lib.flush(); const read = lib.stats.read, srcs = await scanFolder(dir); lib.clear(); lib.add(srcs); await wait(() => lib.tracks.every(t => t.tagged)); out.cachedRescan = lib.stats.read === read && lib.stats.cached >= out.tracks; out.cacheFiles = (await cache.stats()).files; await cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); libs.addRoot(libs.target().id, dir); lib.clear(); const r0 = lib.stats.read; await restoreFromCache(); await wait(() => lib.tracks.every(t => t.tagged)); out.restored = lib.tracks.length === out.tracks && lib.renders.length === out.renders && lib.stats.read === r0; libs.removeRoot(libs.target().id, dir); await cache.delIndex(dir); }
+    { await lib.flush(); const read = lib.stats.read, srcs = await scanFolder(dir); lib.clear(); lib.add(srcs); await wait(() => lib.tracks.every(t => t.tagged)); out.cachedRescan = lib.stats.read === read && lib.stats.cached >= out.tracks; out.cacheFiles = (await cache.stats()).files; await cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); libs.addRoot(libs.target().id, dir); lib.clear(); const r0 = lib.stats.read, tr = performance.now(); await restoreFromCache(); await wait(() => lib.tracks.every(t => t.tagged)); out.restoreMs = Math.round(performance.now() - tr); out.restored = lib.tracks.length === out.tracks && lib.renders.length === out.renders && lib.stats.read === r0; libs.removeRoot(libs.target().id, dir); await cache.delIndex(dir); }
     const sub = await TAURI.core.invoke('selftest_subsonic');
     if (sub) {      // a source plugin end to end: connect, scan, stream (WebKit can't read it cross-origin, so this exercises the HTTP plugin + blob fallback)
       const L = libs.target(), { config, title } = await getSource('subsonic').connect({ url: sub, username: 'alice', password: 'secret' }), conn = { id: 'st', plugin: 'subsonic', title, config }; libs.addConnection(L.id, conn);
@@ -404,7 +418,8 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
 // ------------------------------------------------------------------ start
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
-  await viz.init(); await lib.attachCache(cache).catch(() => {}); applySettings(); paintLibSel(); updateBar(); renderAll();
+  applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
+  await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {})]);
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
   window.__bootleg = { paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test

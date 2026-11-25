@@ -166,3 +166,11 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .omh { display: flex; justify-content: space-between; padding: 4px 8px 6px; } .orow { background: none; border: 0; text-align: left; padding: 8px 10px; border-radius: 8px; cursor: pointer; } .orow:hover { background: var(--panel2); } .orow.sel { background: #1d2342; color: var(--accent); }
 .opad { padding: 6px 10px; } .oadd { display: flex; gap: 6px; padding: 8px 4px 2px; } .oadd input { flex: 1; min-width: 0; }
 .screenrow { margin-top: 8px; } .screenrow select { flex: 1; min-width: 0; }
+
+/* virtualized lists */
+.vrow { position: absolute; left: 0; right: 0; box-sizing: border-box; content-visibility: visible !important; }
+.rows { position: relative; }
+.alist-wrap { overflow: auto; max-height: min(48vh, 520px); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); } .alist-wrap .vc { position: relative; }
+.alist-wrap .arow, .slist .srow2 { box-sizing: border-box; }
+.card { content-visibility: auto; contain-intrinsic-size: 190px 240px; }
+.vc { flex: none; width: 100%; } .alist-wrap .arow.head { position: sticky; top: 0; z-index: 3; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 0; height: 32px; } .arow.sel { background: #1d2342; }

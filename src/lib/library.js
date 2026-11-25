@@ -25,9 +25,9 @@ export class Library extends EventTarget {
   constructor() {
     super(); this.tracks = []; this.renders = []; this._n = 0; this._seen = new Set(); this._byPath = new Map(); this._q = []; this._busy = 0; this.total = 0; this.done = 0; this._pending = false;
     this._covers = new Map(); this._coverP = new Map(); this.cache = new NullCache(); this.fileCache = new Map(); this._dirty = []; this._flushT = 0;
-    this.stats = { read: 0, cached: 0 }; this.concurrency = 6; this.useNfo = true; this.nfoFill = true; this.nfos = new Map(); this._nfoT = 0; this.scope = 'all';
+    this.stats = { read: 0, cached: 0 }; this.concurrency = 6; this.useNfo = true; this.nfoFill = true; this.nfos = new Map(); this._nfoT = 0; this.scope = 'all'; this.ver = 0; this._memo = {}; this.nativeReader = null;
   }
-  _changed() { if (this._pending) return; this._pending = true; requestAnimationFrame(() => { this._pending = false; this.dispatchEvent(new Event('change')); }); }
+  _changed() { this.ver++; if (this._pending) return; this._pending = true; requestAnimationFrame(() => { this._pending = false; this.dispatchEvent(new Event('change')); }); }
   async attachCache(cache) { this.cache = cache; this.fileCache = await cache.loadFiles(); for (const [k, b] of await cache.loadCovers()) this._covers.set(k, URL.createObjectURL(b)); }
   _remember(rec) { this._dirty.push(rec); this.fileCache.set(rec.path, rec); if (!this._flushT) this._flushT = setTimeout(() => this.flush(), 800); }
   async flush() { clearTimeout(this._flushT); this._flushT = 0; const d = this._dirty; this._dirty = []; if (d.length) try { await this.cache.putFiles(d); } catch { /* cache is best-effort */ } }
@@ -40,8 +40,10 @@ export class Library extends EventTarget {
   }
 
   // `libId`: which library these sources belong to. The same file can be in several libraries.
-  get visibleTracks() { return this.scope === 'all' ? this.tracks : this.tracks.filter(t => t.libs.has(this.scope)); }
-  get visibleRenders() { return this.scope === 'all' ? this.renders : this.renders.filter(r => r.libs.has(this.scope)); }
+  // Derived lists are memoized per (data version, library scope): big libraries re-render often while tags stream in.
+  _memoed(key, build) { const k = this.ver + '|' + this.scope, m = this._memo[key]; if (m && m.k === k) return m.v; const v = build(); this._memo[key] = { k, v }; return v; }
+  get visibleTracks() { return this.scope === 'all' ? this.tracks : this._memoed('vt', () => this.tracks.filter(t => t.libs.has(this.scope))); }
+  get visibleRenders() { return this.scope === 'all' ? this.renders : this._memoed('vr', () => this.renders.filter(r => r.libs.has(this.scope))); }
   add(sources, libId = 'music') {
     const fresh = [];
     for (const s of sources) { const old = this._byPath.get(s.path); if (!old) { if (!this._seen.has(s.path)) fresh.push(s); } else { if (old.libs) old.libs.add(libId); if (!same(old.src, s)) this._update(old, s); } }
@@ -65,17 +67,31 @@ export class Library extends EventTarget {
     }
     this._changed(); return { tracks: this.tracks.length, renders: this.renders.length };
   }
+  // Adds many sources without freezing the UI: in slices (never splitting a stem-render folder), yielding between them.
+  async addChunked(sources, libId = 'music', { chunk = 1500, onProgress = () => {} } = {}) {
+    const dirOf2 = p => p.slice(0, p.lastIndexOf('/')).replace(/\/stems$/, ''); let i = 0;
+    while (i < sources.length) {
+      let end = Math.min(sources.length, i + chunk); while (end < sources.length && dirOf2(sources[end].path) === dirOf2(sources[end - 1].path)) end++;
+      this.add(sources.slice(i, end), libId); i = end; onProgress(i, sources.length); await new Promise(r => setTimeout(r, 0));
+    }
+    return { tracks: this.tracks.length, renders: this.renders.length };
+  }
   _enqueue(job) { if (!this._q.length && !this._busy) { this.total = 0; this.done = 0; } this.total++; this._q.push(job); this._pump(); }
   _pump() {
-    while (this._busy < this.concurrency && this._q.length) { const j = this._q.shift(); this._busy++; j().catch(() => {}).finally(() => { this._busy--; this.done++; if (!this._busy && !this._q.length) this.flush(); this._changed(); this._pump(); }); }
+    const limit = this.nativeReader ? Math.max(this.concurrency, 192) : this.concurrency;      // native reading batches many files per call
+    while (this._busy < limit && this._q.length) { const j = this._q.shift(); this._busy++; j().catch(() => {}).finally(() => { this._busy--; this.done++; if (!this._busy && !this._q.length) this.flush(); this._changed(); this._pump(); }); }
   }
   // Items from a source plugin arrive already tagged (nothing to read from a file).
-  _applyRemote(t, s) { const { coverUrl, remote, ...tags } = s.meta; Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; this._nfoFor(t); }
+  _applyRemote(t, s) { t._hay = null; const { coverUrl, remote, ...tags } = s.meta; Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; this._nfoFor(t); }
   _applyTags(t, data) {
+    t._hay = null;
     Object.assign(t, { tagged: true }, data.tags); t.track = t.track || 0; t.disc = t.disc || 0; if (!t.title) t.title = stem(t.src.name); t.coverUrl = data.coverKey ? this._covers.get(data.coverKey) || null : null; this._nfoFor(t);
   }
   async _loadTags(t) {
-    const g = await readTags(t.src.reader()), { key, url } = await this._coverFrom(g.cover), tags = Object.fromEntries(Object.entries(g).filter(([k, v]) => k !== 'cover' && v !== undefined));
+    let g = null; if (this.nativeReader && t.src.kind === 'tauri') g = await this.nativeReader(t.src.path);
+    if (!g) g = await readTags(t.src.reader());                                  // web, or a format the native reader can't handle
+    const { key, url } = g.cover ? await this._coverFrom(g.cover) : g.coverKey && this._covers.has(g.coverKey) ? { key: g.coverKey, url: this._covers.get(g.coverKey) } : { key: null, url: null };
+    const tags = Object.fromEntries(Object.entries(g).filter(([k, v]) => k !== 'cover' && k !== 'coverKey' && v !== undefined));
     const data = { tags, coverKey: key }; this._applyTags(t, data); this.stats.read++; this._remember({ path: t.src.path, size: t.src.size, mtime: t.src.mtime || 0, kind: 'track', data });
   }
   async _loadRender(r) {
@@ -93,6 +109,7 @@ export class Library extends EventTarget {
   }
   _nfoSoon() { if (this._nfoT) return; this._nfoT = setTimeout(() => { this._nfoT = 0; this.tracks.forEach(t => this._nfoFor(t)); this._changed(); }, 50); }
   _nfoFor(t) {
+    t._hay = null;
     if (!this.useNfo || !this.nfos.size) { t.nfo = null; return; }
     const dir = dirOf(t.src.path), here = this.nfos.get(dir) || [], pick = (list, kind) => list.find(x => x.parsed?.kind === kind);
     const album = pick(here, 'album') || null, texts = here.filter(x => x.parsed?.kind === 'text'); let artist = pick(here, 'artist') || null;
@@ -122,9 +139,11 @@ export class Library extends EventTarget {
     this.cache.delFiles(gone.map(x => x[0])).catch(() => {}); this._nfoSoon(); this._changed(); return gone.length;
   }
 
-  sortedTracks() { return this.visibleTracks.slice().sort((a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) { const c = typeof x[i] === 'number' ? x[i] - y[i] : collator.compare(x[i], y[i]); if (c) return c; } return 0; }); }
-  search(list, q) { q = q.trim().toLowerCase(); if (!q) return list; const w = q.split(/\s+/); return list.filter(t => { const h = [t.title, t.artist, t.album, t.genre, t.src?.name, t.dir].join(' ').toLowerCase(); return w.every(x => h.includes(x)); }); }
-  albums() { const m = new Map(); for (const t of this.sortedTracks()) { const k = (t.albumArtist || t.artist || '') + '\u0000' + (t.album || ''); if (!t.album) continue; if (!m.has(k)) m.set(k, { key: k, album: t.album, artist: t.albumArtist || t.artist, coverUrl: t.coverUrl, tracks: [] }); const a = m.get(k); a.tracks.push(t); a.coverUrl ||= t.coverUrl; } return [...m.values()]; }
+  sortedTracks() { return this._memoed('sorted', () => this._sort()); }
+  _sort() { return this.visibleTracks.slice().sort((a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) { const c = typeof x[i] === 'number' ? x[i] - y[i] : collator.compare(x[i], y[i]); if (c) return c; } return 0; }); }
+  search(list, q) { q = q.trim().toLowerCase(); if (!q) return list; if (this._sq && this._sq.list === list && this._sq.q === q) return this._sq.out; const w = q.split(/\s+/), out = list.filter(t => { const h = t._hay ||= [t.title, t.artist, t.album, t.genre, t.src?.name, t.dir].join(' ').toLowerCase(); return w.every(x => h.includes(x)); }); this._sq = { list, q, out }; return out; }
+  albums() { return this._memoed('albums', () => this._albums()); }
+  _albums() { const m = new Map(); for (const t of this.sortedTracks()) { const k = (t.albumArtist || t.artist || '') + '\u0000' + (t.album || ''); if (!t.album) continue; if (!m.has(k)) m.set(k, { key: k, album: t.album, artist: t.albumArtist || t.artist, coverUrl: t.coverUrl, tracks: [] }); const a = m.get(k); a.tracks.push(t); a.coverUrl ||= t.coverUrl; } return [...m.values()]; }
   // Remove a library's claim on everything; entities no library claims any more go away (their cache entries stay: another library or a re-add may want them).
   dropLibrary(libId) { const dead = new Set(); for (const [p, e] of this._byPath) if (e.libs) { e.libs.delete(libId); if (!e.libs.size) { dead.add(e); this._byPath.delete(p); this._seen.delete(p); } } this.tracks = this.tracks.filter(t => !dead.has(t)); this.renders = this.renders.filter(r => !dead.has(r)); this._changed(); return dead.size; }
   clear() { this.tracks = []; this.renders = []; this._seen.clear(); this._byPath.clear(); this.nfos.clear(); this._changed(); }
