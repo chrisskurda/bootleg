@@ -30,7 +30,7 @@ export class Outputs extends EventTarget {
     try {
       const m = await this.resolveUrl(item); if (!m) throw new Error('This item cannot be sent to a device (open it from the desktop app, or from a server)');
       const dev = this.active, plug = getOutput(dev.plugin);
-      await plug.play(dev, { ...m, title: item.title, artist: item.artist, album: item.album, duration: p.dur() }); await plug.volume(dev, p.volume).catch(() => {});
+      await plug.play(dev, { ...m, title: item.title, artist: item.artist, album: item.album, duration: p.dur() }); // the device keeps its own volume until the user moves the slider while casting
       const pos = p.pos(); if (pos > 2) setTimeout(() => plug.seek(dev, pos).catch(() => {}), 1200);       // joined mid-track
       if (!p.playing) await plug.pause(dev).catch(() => {}); this.error = ''; this._emit();
     } catch (e) { this._fail(e); }

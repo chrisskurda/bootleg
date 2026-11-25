@@ -318,6 +318,17 @@ async function paintSettings() {
       h('span', { class: 'sbtns' }, h('button', { class: 'btn', disabled: !TAURI && !libs.allConnections().length, onclick: () => syncAll() }, 'Check for changes now'), h('button', { class: 'btn', onclick: async () => { await cache.clear(); lib.fileCache.clear(); toast('Cache cleared — tags will be re-read on the next scan'); paintSettings(); } }, 'Clear cache'))));
 }
 
+// ------------------------------------------------------------------ visualizer on another screen
+async function paintScreens() {
+  const sel = $('#screenSel'); if (!TAURI) { sel.hidden = true; return; }
+  try { const mons = await TAURI.core.invoke('screens_list'); sel.replaceChildren(...mons.map(m => h('option', { value: m.index, selected: !m.primary && mons.length > 1 }, `${m.name || 'Display ' + (m.index + 1)}${m.primary ? ' (main)' : ''} — ${m.w}×${m.h}`))); if (mons.length > 1) sel.value = String(mons.find(m => !m.primary).index); sel.hidden = mons.length < 2; } catch { sel.hidden = true; }
+}
+$('#screenBtn').onclick = async () => {
+  try { if (TAURI) await TAURI.core.invoke('screen_open', { index: +($('#screenSel').value || 0) }); else if (!window.open('/screen.html', 'bootleg-screen', 'popup,width=960,height=540')) toast('Allow pop-ups to open the visualizer screen', true); }
+  catch (e) { toast(String(e), true); }
+};
+$('#screenBtn').addEventListener('mouseenter', paintScreens); paintScreens();
+
 // ------------------------------------------------------------------ outputs (cast targets)
 const SUFFIX_MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
 const artCache = new Map();    // cover URL → URL the device can fetch
@@ -373,14 +384,15 @@ async function selfTest(dir) {
       const L = libs.target(), { config, title } = await getSource('subsonic').connect({ url: sub, username: 'alice', password: 'secret' }), conn = { id: 'st', plugin: 'subsonic', title, config }; libs.addConnection(L.id, conn);
       const r = await syncConnection(conn, L); out.remoteTracks = r.total; const rt = lib.tracks.find(t => t.remote); await player.playList([rt], 0); await wait(() => player.playing && player.pos() > 0.7); let pk = 0; for (let i = 0; i < 20; i++) { pk = Math.max(pk, ...feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } out.remotePeak = pk; out.remoteBlob = player.audio.src.startsWith('blob:');
     }
-    const dl = await TAURI.core.invoke('selftest_dlna');
+    const dlRaw = await TAURI.core.invoke('selftest_dlna'), [dl, dlFlags = ''] = (dlRaw || '').split(';');
     if (dl) {       // casting end to end against a mock DLNA renderer: control (SOAP), the LAN media server, transport mirroring
       const dev = await getOutput('dlna').add(dl); out.dlnaName = dev.name; out.dlnaSsdp = (await getOutput('dlna').discover({ timeoutMs: 2500 }).catch(() => [])).some(d => d.id === dev.id);
       const local = lib.sortedTracks().find(t => t.src.kind === 'tauri'); await player.playList([local], 0); await wait(() => player.playing && player.pos() > 0.5);
       await outputs.select(dev); if (outputs.error) throw new Error('cast: ' + outputs.error); await new Promise(r => setTimeout(r, 1800));
-      player.pause(); await new Promise(r => setTimeout(r, 400)); player.seek(3); await new Promise(r => setTimeout(r, 400)); player.setVolume(0.5); await new Promise(r => setTimeout(r, 400));
+      player.pause(); await new Promise(r => setTimeout(r, 400)); player.seek(3); await new Promise(r => setTimeout(r, 400)); if (!dlFlags.includes('novol')) player.setVolume(0.5); await new Promise(r => setTimeout(r, 400));
       out.dlnaStatus = (await getOutput('dlna').status(dev)).state; await outputs.select(null); out.dlnaLocalRestored = player.localOut !== false;
     }
+    { const mons = await TAURI.core.invoke('screens_list'); out.screens = mons.length; await TAURI.core.invoke('screen_open', { index: 0 }); await wait(() => viz.screenAlive, 12000); out.screenOpened = true; await TAURI.core.invoke('screen_close'); }   // a second window on a display, talking to the player
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -395,5 +407,5 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   await viz.init(); await lib.attachCache(cache).catch(() => {}); applySettings(); paintLibSel(); updateBar(); renderAll();
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
-  window.__bootleg = { outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

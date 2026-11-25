@@ -44,3 +44,10 @@ The mirror image of source plugins: they send playback *out* to another device. 
 - **DLNA/UPnP:** SSDP discovery, plus "add by address" (a device description URL) for networks that block multicast.
 - **AirPlay:** macOS routes system audio to AirPlay speakers (Control Center → Sound), and bootleg's audio — stems included — follows it. There is no public sender protocol for AirPlay, so a native in-app AirPlay target is not planned.
 - **Google Cast:** planned as an output plugin speaking the CASTV2 protocol natively from Rust (mDNS discovery, TLS, Default Media Receiver). Google's sender SDK only runs in Chrome, not in the desktop webview.
+
+## Showing the visualizer on other screens
+DLNA renderers play media, not web pages, so the visualizer can't ride on a DLNA cast (that would need a live video encoder). Instead the player can show it on **another display or window**: *Now playing → Show on another screen* opens a fullscreen window on the chosen monitor (an HDMI/projector display, or a Mac display mirrored to an AirPlay/Chromecast TV). The player analyses audio once and broadcasts each frame (`src/lib/screen-link.js`); `src/screen.html` rebuilds the pack's `A` object (stems, `A.past`) and renders. It keeps running while the player shows another view. In a browser the same page opens as a pop-up. Next step (with the bridge project): serve this page and the frames over the LAN so any browser — a smart TV, tablet, Pi — can be a screen.
+
+## Tested on real hardware
+- LG webOS TV (UP7000PUA): discovery, control, audio fetch (HEAD + ranged GET) and album-art fetch all worked. The first `Play` took longer than the old 6 s timeout, so SOAP timeouts are now 25 s. Casting no longer changes the device's volume when you connect (only when you move the slider afterwards).
+- `BOOTLEG_LAN_LOG=<file>` logs what devices request from the LAN media server (handy when a renderer misbehaves).

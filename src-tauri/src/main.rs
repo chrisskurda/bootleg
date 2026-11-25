@@ -62,6 +62,25 @@ async fn dlna_volume(rc: String, volume: u8) -> Result<(), String> { tauri::asyn
 #[tauri::command]
 async fn dlna_status(av: String) -> Result<dlna::Status, String> { tauri::async_runtime::spawn_blocking(move || dlna::status(&av)).await.map_err(|e| e.to_string())? }
 
+// ---- visualizer screens: a borderless fullscreen window on a chosen display (an HDMI/AirPlay-mirrored screen, a projector…)
+#[derive(serde::Serialize)]
+struct Mon { index: usize, name: String, w: u32, h: u32, primary: bool }
+#[tauri::command]
+fn screens_list(app: AppHandle) -> Result<Vec<Mon>, String> {
+    let prim = app.primary_monitor().map_err(|e| e.to_string())?.map(|m| (m.position().x, m.position().y));
+    Ok(app.available_monitors().map_err(|e| e.to_string())?.iter().enumerate().map(|(i, m)| Mon { index: i, name: m.name().cloned().unwrap_or_else(|| format!("Display {}", i + 1)), w: m.size().width, h: m.size().height, primary: prim == Some((m.position().x, m.position().y)) }).collect())
+}
+#[tauri::command]
+async fn screen_open(app: AppHandle, index: usize) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("screen") { let _ = w.close(); }
+    let mons = app.available_monitors().map_err(|e| e.to_string())?; let m = mons.get(index).ok_or("no such display")?;
+    let f = m.scale_factor();
+    let w = WebviewWindowBuilder::new(&app, "screen", WebviewUrl::App("screen.html".into())).title("bootleg visualizer").position(m.position().x as f64 / f + 40.0, m.position().y as f64 / f + 40.0).inner_size(960.0, 540.0).build().map_err(|e| e.to_string())?;
+    w.set_fullscreen(true).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn screen_close(app: AppHandle) { if let Some(w) = app.get_webview_window("screen") { let _ = w.close(); } }
+
 /// Some(dir) when launched for the self-test.
 #[tauri::command]
 fn selftest_config() -> Option<String> { env::var("BOOTLEG_SELFTEST").ok() }
@@ -85,7 +104,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .setup(|app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);

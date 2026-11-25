@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "The player window: pick folders/files, read the library the user chose, save exports. Source plugins (e.g. Subsonic) talk to servers the user configured, so HTTP(S) is allowed.",
   "windows": [
-    "main"
+    "main",
+    "screen"
   ],
   "permissions": [
     "core:default",

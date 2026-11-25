@@ -21,7 +21,7 @@ for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; timeout 150 "${RUN[@]}
 [ -f "$T/out.json" ] || { echo "no result — the app never finished its self-test"; tail -30 "$T/app.log"; exit 1; }
 cat "$T/out.json"; echo
 node -e '
-const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), need = ["ok", "cachedRescan", "restored", "notesDb"], bad = need.filter(k => !r[k]);
+const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), need = ["ok", "cachedRescan", "restored", "notesDb", "screenOpened"], bad = need.filter(k => !r[k]);
 if (!(r.tracks >= 1 && r.renders >= 1 && r.stems === 5 && r.peak > 0.2 && r.remoteTracks === 2 && r.remotePeak > 0.2)) bad.push("playback/stems/remote");
 const log = (require("fs").existsSync(process.argv[2]) ? require("fs").readFileSync(process.argv[2], "utf8") : "").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)), has = f => log.some(f);
 if (!(has(l => l.action === "SetAVTransportURI" && /^http:\/\/[^/]+\/m\/[0-9a-f]{32}\.flac$/.test(l.uri) && l.title === "Self Test" && l.artist === "Tester" && l.mime === "audio/flac") && has(l => l.action === "Play") && has(l => l.fetched === 206 && l.bytes === 100 && /flac/.test(l.type)) && has(l => l.action === "Pause") && has(l => l.action === "Seek" && l.target === "00:00:03") && has(l => l.action === "SetVolume" && l.volume === 50) && has(l => l.artFetched === 200 && l.bytes > 100 && /^image\//.test(l.type)) && has(l => l.action === "Stop") && r.dlnaLocalRestored)) bad.push("dlna: " + JSON.stringify(log).slice(0, 400));

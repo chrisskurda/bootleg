@@ -90,6 +90,13 @@ try {
   await sleep(900); const q = await ev(() => { const A = document.querySelector('#vizStage iframe').contentWindow.__AUDIO; return { mix: A.level, kick: A.stem('kick').level, kickAudible: A.stem('kick').audible, maxStem: Math.max(...A.stems.map(s => s.level)) }; });
   t('all muted: the mix is silent but a muted stem still drives its visual (tap is before the fader)', q.mix < 0.08 && q.maxStem > 0.15 && q.kickAudible === false, JSON.stringify(q));
   await pg.locator('#stemRows .stem').locator('.ms.m.on').first().click(); // unmute one to hear again
+  // ---- a visualizer screen (second window) follows the player
+  const sp = await pg.context().newPage(); sp.on('pageerror', e => errs.push('screen: ' + e.message)); await sp.goto(`http://127.0.0.1:${PORT}/screen.html`); await sp.waitForFunction(() => document.getElementById('msg').hidden, null, { timeout: 15000 }); await sleep(800);
+  const sa = await sp.evaluate(() => { const w = document.getElementById('pack').contentWindow, A = w.__AUDIO; return { src: document.getElementById('pack').src, live: A.live, stems: A.stems.length, kickLevel: typeof A.stem('kick').level, peak: Math.max(...A.spectrum), past: A.past(0.5).length, title: w.__META.title }; });
+  t('a screen window shows the selected pack, fed with the player\'s live audio, stems and song info', /stem-rack/.test(sa.src) && sa.live && sa.stems === 5 && sa.kickLevel === 'number' && sa.peak > 0.2 && sa.past === 64 && !!sa.title, JSON.stringify(sa));
+  await pg.bringToFront(); await pg.selectOption('#packSelect', 'weather-report'); await sp.waitForFunction(() => /weather-report/.test(document.getElementById('pack').src), null, { timeout: 8000 }); t('changing the pack in the player changes it on the screen', true);
+  await pg.click('.nav[data-view="tracks"]'); const t1 = await sp.evaluate(() => document.getElementById('pack').contentWindow.__AUDIO.t); await sleep(900); const t2 = await sp.evaluate(() => document.getElementById('pack').contentWindow.__AUDIO.t); t('the screen keeps updating while the player shows another view', t2 > t1 + 0.4, `${t1.toFixed(2)} → ${t2.toFixed(2)}`);
+  await sp.close(); await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'stem-rack');
   // back to a plain track: stems are released
   await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row').first().dblclick(); await pg.waitForFunction(() => window.__bootleg.player.mode === 'element' && window.__bootleg.player.playing);
   t('switching to a plain track releases the stems from the visualizer', (await ev(() => window.__bootleg.feed.taps.length)) === 0 && (await pg.locator('#stemsPanel').isHidden()) || true);

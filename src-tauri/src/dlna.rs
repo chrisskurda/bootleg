@@ -64,7 +64,7 @@ pub fn ssdp(timeout: Duration) -> Vec<String> {
 
 fn soap(url: &str, svc: &str, action: &str, args: &str) -> Result<String, String> {
     let body = format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:{action} xmlns:u=\"{svc}\">{args}</u:{action}></s:Body></s:Envelope>");
-    match ureq::post(url).set("Content-Type", "text/xml; charset=\"utf-8\"").set("SOAPAction", &format!("\"{svc}#{action}\"")).timeout(Duration::from_secs(6)).send_string(&body) {
+    match ureq::post(url).set("Content-Type", "text/xml; charset=\"utf-8\"").set("SOAPAction", &format!("\"{svc}#{action}\"")).timeout(Duration::from_secs(25)).send_string(&body) {
         Ok(r) => r.into_string().map_err(|e| e.to_string()),
         Err(ureq::Error::Status(code, r)) => { let t = r.into_string().unwrap_or_default(); Err(format!("{action} failed ({code}): {}", tag(&t, "errorDescription").unwrap_or_default())) }
         Err(e) => Err(format!("{action}: {e}")),

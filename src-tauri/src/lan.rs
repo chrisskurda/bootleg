@@ -38,6 +38,10 @@ fn token() -> String { let mut o = String::new(); for _ in 0..2 { o += &format!(
 
 fn serve(req: tiny_http::Request, shares: Shares) {
     let url = req.url().to_string();
+    if let Ok(f) = std::env::var("BOOTLEG_LAN_LOG") {      // debugging aid: log what devices ask for
+        let hs: Vec<String> = req.headers().iter().map(|h| format!("{}: {}", h.field, h.value)).collect(); let line = format!("{:?} {} | {}\n", req.method(), url, hs.join(" | "));
+        use std::io::Write; if let Ok(mut fh) = std::fs::OpenOptions::new().create(true).append(true).open(f) { let _ = fh.write_all(line.as_bytes()); }
+    }
     let id = url.trim_start_matches("/m/").split(['.', '?']).next().unwrap_or("").to_string();
     let found = shares.lock().ok().and_then(|m| match m.get(&id) { Some(Share::File(p)) => Some(Share::File(p.clone())), Some(Share::Bytes(b, t)) => Some(Share::Bytes(b.clone(), t.clone())), None => None });
     let Some(share) = found.filter(|_| url.starts_with("/m/")) else { let _ = req.respond(Response::empty(404)); return; };

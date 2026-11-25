@@ -165,3 +165,4 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .outmenu { position: fixed; right: 14px; bottom: 74px; width: 340px; max-width: calc(100vw - 28px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; box-shadow: 0 12px 40px #000a; z-index: 50; display: flex; flex-direction: column; gap: 2px; }
 .omh { display: flex; justify-content: space-between; padding: 4px 8px 6px; } .orow { background: none; border: 0; text-align: left; padding: 8px 10px; border-radius: 8px; cursor: pointer; } .orow:hover { background: var(--panel2); } .orow.sel { background: #1d2342; color: var(--accent); }
 .opad { padding: 6px 10px; } .oadd { display: flex; gap: 6px; padding: 8px 4px 2px; } .oadd input { flex: 1; min-width: 0; }
+.screenrow { margin-top: 8px; } .screenrow select { flex: 1; min-width: 0; }
