@@ -39,7 +39,14 @@ export class Player extends EventTarget {
       const ok = await this.deck.load(item, (n, total) => { this.loading = { n, total }; this._emit(); }); this.loading = null;
       if (!ok) return;
     } else { this.mode = 'element'; this.deck.dispose(); this.feed.fromElement(this.audio); await this._setSrc(item); }
-    this._media(item); this._emit();
+    this._applyOut(); this._media(item); this._emit();
+  }
+  // While casting, local playback keeps running (the visualizer and timeline need it) but is silent: the output node is
+  // disconnected from the speakers, the analysers stay connected.
+  setLocalOutput(on) { this.localOut = on !== false; this._applyOut(); }
+  _applyOut() {
+    const ctx = this.feed.ctx; if (!ctx) return; const node = this.mode === 'deck' ? this.deck.master : this.audio._mes; if (!node) return;
+    try { if (this.localOut === false) node.disconnect(ctx.destination); else { node.disconnect(ctx.destination); node.connect(ctx.destination); } } catch { /* not connected */ }
   }
   // Some webviews (WebKitGTK/GStreamer) cannot stream media from the custom asset:// scheme. If the element rejects the URL,
   // fetch the file once (the asset protocol does allow that) and play it from a blob: URL instead.
@@ -52,8 +59,8 @@ export class Player extends EventTarget {
   pause() { if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }
   toggle() { this.playing ? this.pause() : this.play(); }
   stop() { this.deck.pause(); this.audio.pause(); this._emit(); }
-  seek(t) { if (this.mode === 'deck') this.deck.seek(t); else this.audio.currentTime = Math.max(0, t); this._emit(); }
-  setVolume(v) { this.volume = v; this.audio.volume = v; this.deck.setVolume(v); try { localStorage.setItem('bootleg.volume', String(v)); } catch { /* private mode */ } this._emit(); }
+  seek(t) { if (this.mode === 'deck') this.deck.seek(t); else this.audio.currentTime = Math.max(0, t); this.dispatchEvent(new CustomEvent('seek', { detail: Math.max(0, t) })); this._emit(); }
+  setVolume(v) { this.dispatchEvent(new CustomEvent('volume', { detail: v })); this.volume = v; this.audio.volume = v; this.deck.setVolume(v); try { localStorage.setItem('bootleg.volume', String(v)); } catch { /* private mode */ } this._emit(); }
   next() { this._step(1, false); }
   prev() { if (this.pos() > 3) this.seek(0); else this._step(-1, false); }
   _step(dir, natural) {

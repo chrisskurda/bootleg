@@ -33,3 +33,14 @@ Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's 
 
 ## Testing
 `tests/mock-subsonic.mjs` is a small in-process Subsonic server (with and without CORS) used by `tests/app.test.mjs` and the desktop self-tests (`BOOTLEG_SELFTEST_SUBSONIC`). Do the same for your service: a mock, then drive connect → scan → play → restart → rescan.
+
+---
+
+# Output plugins (cast targets)
+The mirror image of source plugins: they send playback *out* to another device. Contract in `src/lib/outputs/plugin.js`; `outputs/dlna.js` is the reference (discovery + SOAP control run in Rust, `src-tauri/src/dlna.rs`).
+
+- The **Outputs manager** keeps local playback running *silently* while casting (output disconnected from the speakers, analysers still connected), so the visualizer, timeline, notes and queue keep working. Play/pause/seek/volume and track changes are mirrored to the device.
+- Local files are served to the device by a tiny **LAN media server** (`src-tauri/src/lan.rs`): random token URLs, Range support, and only files already opened in the app can be shared. Server (Subsonic) tracks hand the device the stream URL directly. Stem renders cast their `mix` file (mute/solo are local-only).
+- **DLNA/UPnP:** SSDP discovery, plus "add by address" (a device description URL) for networks that block multicast.
+- **AirPlay:** macOS routes system audio to AirPlay speakers (Control Center → Sound), and bootleg's audio — stems included — follows it. There is no public sender protocol for AirPlay, so a native in-app AirPlay target is not planned.
+- **Google Cast:** planned as an output plugin speaking the CASTV2 protocol natively from Rust (mDNS discovery, TLS, Default Media Receiver). Google's sender SDK only runs in Chrome, not in the desktop webview.

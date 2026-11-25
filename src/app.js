@@ -10,6 +10,8 @@ import { albumKey } from '/lib/album-details.js';
 import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
 import { getSource, listSources } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
+import { Outputs } from '/lib/outputs/manager.js';
+import { getOutput } from '/lib/outputs/index.js';
 import { Libraries, MODES } from '/lib/libraries.js';
 import { LibCache, NullCache } from '/lib/cache.js';
 import { AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
@@ -316,6 +318,32 @@ async function paintSettings() {
       h('span', { class: 'sbtns' }, h('button', { class: 'btn', disabled: !TAURI && !libs.allConnections().length, onclick: () => syncAll() }, 'Check for changes now'), h('button', { class: 'btn', onclick: async () => { await cache.clear(); lib.fileCache.clear(); toast('Cache cleared — tags will be re-read on the next scan'); paintSettings(); } }, 'Clear cache'))));
 }
 
+// ------------------------------------------------------------------ outputs (cast targets)
+const SUFFIX_MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
+const outputs = new Outputs(player, { resolveUrl: async item => {
+  const src = item.kind === 'render' ? item.mix : item.src; if (!src) return null;
+  if (src.kind === 'tauri') return { url: await TAURI.core.invoke('lan_share', { path: src.path }), mime: await TAURI.core.invoke('lan_mime', { path: src.path }) };
+  if (src.kind === 'remote') return { url: src.url(), mime: SUFFIX_MIME[(src.name.split('.').pop() || '').toLowerCase()] || 'audio/mpeg' };
+  return null;      // browser files live only in this tab: the device cannot reach them
+} });
+function paintOutMenu() {
+  const m = $('#outMenu'), act = outputs.active; $('#outName').textContent = act ? act.name : 'This computer'; $('#outBtn').classList.toggle('on', !!act);
+  if (m.hidden) return; const manual = store.get('outputs', []), addIn = h('input', { placeholder: 'Device address, e.g. 192.168.1.20:49152/desc.xml', 'aria-label': 'Device address' });
+  m.replaceChildren(h('div', { class: 'omh' }, h('b', {}, 'Play on'), h('button', { class: 'link', onclick: () => scanOutputs() }, outputs.scanning ? 'scanning…' : 'rescan')),
+    h('button', { class: 'orow' + (act ? '' : ' sel'), onclick: () => pickOutput(null) }, '🖥 This computer'),
+    ...outputs.devices.map(d => h('button', { class: 'orow' + (act && act.id === d.id ? ' sel' : ''), onclick: () => pickOutput(d), title: d.model || '' }, '📡 ', d.name, h('span', { class: 'muted small' }, ' · ' + (getOutputName(d.plugin))))),
+    !outputs.devices.length ? h('div', { class: 'muted small opad' }, TAURI ? (outputs.scanning ? 'Looking for devices on your network…' : 'No devices found. Make sure they are on the same network, or add one by address below.') : 'Casting needs the desktop app (browsers cannot reach devices on your network).') : '',
+    outputs.error ? h('div', { class: 'err opad' }, outputs.error) : '',
+    /Mac/.test(navigator.platform) && TAURI ? h('div', { class: 'muted small opad' }, 'AirPlay: pick AirPlay speakers in the macOS sound menu (Control Center) — everything bootleg plays, stems included, follows it.') : '',
+    TAURI ? h('div', { class: 'oadd' }, addIn, h('button', { class: 'btn', onclick: async () => { const v = addIn.value.trim(); if (!v) return; try { await outputs.addByAddress('dlna', v); const list = store.get('outputs', []); if (!list.some(x => x.input === v)) { list.push({ plugin: 'dlna', input: v }); store.set('outputs', list); } } catch (e) { outputs.error = String(e.message || e); paintOutMenu(); } } }, 'Add')) : '');
+}
+const getOutputName = id => ({ dlna: 'DLNA' }[id] || id);
+async function scanOutputs() { if (!TAURI) { paintOutMenu(); return; } await outputs.scan(store.get('outputs', [])); }
+async function pickOutput(d) { await outputs.select(d); paintOutMenu(); if (d && !outputs.error) toast(`Playing on ${d.name}`); }
+outputs.addEventListener('change', paintOutMenu);
+$('#outBtn').onclick = e => { e.stopPropagation(); const m = $('#outMenu'); m.hidden = !m.hidden; if (!m.hidden) { paintOutMenu(); if (!outputs.devices.length && !outputs.scanning) scanOutputs(); } };
+document.addEventListener('click', e => { const m = $('#outMenu'); if (!m.hidden && !m.contains(e.target) && e.target.id !== 'outBtn') m.hidden = true; });
+
 // ------------------------------------------------------------------ notes, ratings, playlists
 async function saveText(name, text, mime, fullPath) {
   if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: fullPath || name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
@@ -337,6 +365,14 @@ async function selfTest(dir) {
       const L = libs.target(), { config, title } = await getSource('subsonic').connect({ url: sub, username: 'alice', password: 'secret' }), conn = { id: 'st', plugin: 'subsonic', title, config }; libs.addConnection(L.id, conn);
       const r = await syncConnection(conn, L); out.remoteTracks = r.total; const rt = lib.tracks.find(t => t.remote); await player.playList([rt], 0); await wait(() => player.playing && player.pos() > 0.7); let pk = 0; for (let i = 0; i < 20; i++) { pk = Math.max(pk, ...feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } out.remotePeak = pk; out.remoteBlob = player.audio.src.startsWith('blob:');
     }
+    const dl = await TAURI.core.invoke('selftest_dlna');
+    if (dl) {       // casting end to end against a mock DLNA renderer: control (SOAP), the LAN media server, transport mirroring
+      const dev = await getOutput('dlna').add(dl); out.dlnaName = dev.name; out.dlnaSsdp = (await getOutput('dlna').discover({ timeoutMs: 2500 }).catch(() => [])).some(d => d.id === dev.id);
+      const local = lib.sortedTracks().find(t => t.src.kind === 'tauri'); await player.playList([local], 0); await wait(() => player.playing && player.pos() > 0.5);
+      await outputs.select(dev); if (outputs.error) throw new Error('cast: ' + outputs.error); await new Promise(r => setTimeout(r, 1800));
+      player.pause(); await new Promise(r => setTimeout(r, 400)); player.seek(3); await new Promise(r => setTimeout(r, 400)); player.setVolume(0.5); await new Promise(r => setTimeout(r, 400));
+      out.dlnaStatus = (await getOutput('dlna').status(dev)).state; await outputs.select(null); out.dlnaLocalRestored = player.localOut !== false;
+    }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -351,5 +387,5 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   await viz.init(); await lib.attachCache(cache).catch(() => {}); applySettings(); paintLibSel(); updateBar(); renderAll();
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
-  window.__bootleg = { sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

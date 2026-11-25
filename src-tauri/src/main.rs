@@ -6,6 +6,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{env, fs, path::PathBuf};
+mod dlna;
+mod lan;
+
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_fs::FsExt;
 
@@ -24,6 +27,33 @@ fn allow_path(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---- cast / network outputs ----------------------------------------------------------------------------------------
+/// Makes an already-allowed local file fetchable from other devices on the network; returns its LAN URL.
+#[tauri::command]
+fn lan_share(app: AppHandle, path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !app.asset_protocol_scope().is_allowed(&p) { return Err("that file has not been opened in bootleg".into()); }
+    lan::share(&p)
+}
+#[tauri::command]
+fn lan_mime(path: String) -> String { lan::mime_of(&path).to_string() }
+#[tauri::command]
+async fn dlna_discover(timeout_ms: u64) -> Result<Vec<dlna::Device>, String> {
+    tauri::async_runtime::spawn_blocking(move || dlna::ssdp(std::time::Duration::from_millis(timeout_ms.clamp(500, 8000))).into_iter().filter_map(|l| dlna::describe(&l).ok()).collect()).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn dlna_add(location: String) -> Result<dlna::Device, String> { tauri::async_runtime::spawn_blocking(move || dlna::describe(&location)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
+async fn dlna_play(av: String, url: String, title: String, artist: String, album: String, mime: String) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::play(&av, &url, &title, &artist, &album, &mime)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
+async fn dlna_transport(av: String, action: String) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::transport(&av, &action)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
+async fn dlna_seek(av: String, secs: f64) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::seek(&av, secs)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
+async fn dlna_volume(rc: String, volume: u8) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::volume(&rc, volume)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
+async fn dlna_status(av: String) -> Result<dlna::Status, String> { tauri::async_runtime::spawn_blocking(move || dlna::status(&av)).await.map_err(|e| e.to_string())? }
+
 /// Some(dir) when launched for the self-test.
 #[tauri::command]
 fn selftest_config() -> Option<String> { env::var("BOOTLEG_SELFTEST").ok() }
@@ -31,6 +61,10 @@ fn selftest_config() -> Option<String> { env::var("BOOTLEG_SELFTEST").ok() }
 /// Some(url) when the self-test should also exercise a Subsonic server (BOOTLEG_SELFTEST_SUBSONIC).
 #[tauri::command]
 fn selftest_subsonic() -> Option<String> { env::var("BOOTLEG_SELFTEST_SUBSONIC").ok() }
+
+/// Some(description URL) when the self-test should also drive a (mock) DLNA renderer.
+#[tauri::command]
+fn selftest_dlna() -> Option<String> { env::var("BOOTLEG_SELFTEST_DLNA").ok() }
 
 #[tauri::command]
 fn selftest_done(app: AppHandle, result: String) {
@@ -43,7 +77,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, selftest_config, selftest_subsonic, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, lan_share, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .setup(|app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
