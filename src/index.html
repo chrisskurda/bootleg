@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bootleg</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand"><b>bootleg</b></div>
+    <div class="adders">
+      <button id="addFolder" class="btn primary">Add folder</button>
+      <button id="addFiles" class="btn">Add files</button>
+    </div>
+    <input id="search" type="search" placeholder="Search tracks, artists, albums…  ( / )" autocomplete="off" aria-label="Search">
+    <div id="status" class="status"></div>
+    <div id="sys" class="sys"></div>
+  </header>
+
+  <div class="body">
+    <nav class="side" aria-label="Library">
+      <button class="nav on" data-view="tracks">Tracks <span id="nTracks" class="count"></span></button>
+      <button class="nav" data-view="albums">Albums <span id="nAlbums" class="count"></span></button>
+      <button class="nav" data-view="renders">Stem renders <span id="nRenders" class="count"></span></button>
+      <button class="nav" data-view="now">Now playing</button>
+      <div class="side-foot"><button id="forget" class="link" hidden>Forget library</button></div>
+    </nav>
+
+    <main id="main">
+      <section id="view-tracks" class="view">
+        <div class="thead"><span></span><span>Title</span><span>Artist</span><span>Album</span><span class="r">Time</span></div>
+        <div id="trackList" class="rows"></div>
+        <div id="emptyTracks" class="empty"><b>Add some music.</b><br>Choose a folder (or drop one here). Tags and cover art are read from the files.<br>A stem render folder (with <code>manifest.json</code> and <code>stems/</code>) shows up under <i>Stem renders</i>.</div>
+      </section>
+      <section id="view-albums" class="view" hidden><div id="albumGrid" class="grid"></div><div id="emptyAlbums" class="empty">No albums yet — albums come from your files' tags.</div></section>
+      <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem renders yet. Add a MusicGen render folder to mute, solo and watch each stem.</div></section>
+
+      <section id="view-now" class="view" hidden>
+        <div class="nowgrid">
+          <div id="vizStage" class="stage"><iframe title="Visualizer"></iframe><div id="vizMsg" class="vizmsg"></div></div>
+          <aside class="vizside">
+            <div class="row"><select id="packSelect" aria-label="Visualizer pack"></select><button id="fsBtn" class="btn" title="Fullscreen (f)">⛶</button></div>
+            <h4>Pack settings</h4><div id="packParams" class="controls"></div>
+            <h4>Look &amp; FX <button id="lookReset" class="link">reset</button></h4><div id="lookParams" class="controls"></div>
+          </aside>
+        </div>
+        <section id="stemsPanel" class="stems" hidden>
+          <h4>Stems <span id="stemsHint" class="muted"></span></h4>
+          <div id="stemRows"></div>
+        </section>
+      </section>
+    </main>
+
+    <aside id="queue" class="queue" hidden>
+      <div class="qhead"><b>Queue</b><button id="qClear" class="link">clear</button></div>
+      <div id="queueList"></div>
+      <div id="queueEmpty" class="empty small">The queue is empty.</div>
+    </aside>
+  </div>
+
+  <footer class="bar">
+    <div class="np" id="np"><img id="npCover" alt="" hidden><div class="npt"><div id="npTitle" class="t">Nothing playing</div><div id="npSub" class="s"></div></div></div>
+    <div class="transport">
+      <div class="btns">
+        <button id="prev" class="btn icon" title="Previous" aria-label="Previous">⏮</button>
+        <button id="play" class="btn icon big" title="Play / pause (space)" aria-label="Play">▶</button>
+        <button id="next" class="btn icon" title="Next" aria-label="Next">⏭</button>
+      </div>
+      <div class="seekrow"><span id="tcur" class="mono">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek"><span id="tdur" class="mono">0:00</span></div>
+    </div>
+    <div class="right">
+      <button id="shuffle" class="btn icon" title="Shuffle" aria-label="Shuffle">⇄</button>
+      <button id="repeat" class="btn icon" title="Repeat: off" aria-label="Repeat">⟲</button>
+      <input id="volume" type="range" min="0" max="1" step="0.01" aria-label="Volume">
+      <button id="qToggle" class="btn" title="Queue">Queue <span id="qCount" class="count"></span></button>
+    </div>
+  </footer>
+</div>
+<input id="folderIn" type="file" webkitdirectory multiple hidden>
+<input id="filesIn" type="file" multiple hidden accept="audio/*,.flac,.m4a,.opus,.json">
+<script src="/vendor/bootleg-vizualizer/core/look.js"></script>
+<script src="/vendor/bootleg-vizualizer/core/meta.js"></script>
+<script src="/vendor/bootleg-vizualizer/core/stems.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

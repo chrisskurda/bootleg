@@ -5,5 +5,16 @@
   "description": "Audio player for standard tracks and stem renders, with bootleg-vizualizer visualizers. Web app with a Tauri desktop wrapper.",
   "license": "MIT",
   "type": "module",
-  "repository": { "type": "git", "url": "https://git.skurda.org/chris/bootleg.git" }
+  "repository": {
+    "type": "git",
+    "url": "https://git.skurda.org/chris/bootleg.git"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "test": "node tests/tags.test.mjs && node tests/app.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.50.0"
+  }
 }
