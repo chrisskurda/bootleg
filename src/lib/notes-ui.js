@@ -1,6 +1,7 @@
 // Notes, ratings, provenance, playlists and import/export — the cataloguing side of the player.
 import { parseNfo, buildAlbumNfo, nfoRatingToStars } from './nfo.js';
 import { MODES, STATUSES } from './libraries.js';
+import { albumKey } from './album-details.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
 export const trackKey = t => !t ? null : t.kind === 'render' ? 'render:' + t.dir : 'file:' + (t.src?.path || t.title) + '#' + (t.src?.size ?? '');
@@ -92,14 +93,14 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
   $('#markHere').onclick = () => { if (!cur) { toast('Play something first'); return; } show('now'); setTimeout(() => $('#noteText')?.focus(), 50); };
 
   // ---- Notes browser: everything annotated, across the library
-  const byKey = () => { const m = new Map(); for (const t of [...lib.tracks, ...lib.renders]) m.set(trackKey(t), t); return m; };
+  const byKey = () => { const m = new Map(); for (const t of [...lib.tracks, ...lib.renders]) m.set(trackKey(t), t); for (const a of lib.albums()) m.set(albumKey(a), { title: a.album, artist: a.artist, album: 'album', tracks: a.tracks, isAlbum: true }); return m; };
   async function paintLists() {
     const q = $('#noteSearch').value, minR = +$('#noteMin').value, tag = $('#noteTag').value, status = $('#noteStatus').value, recs = await store.find({ minRating: minR, text: q || undefined, tag: tag || undefined, status: status || undefined }), keys = byKey();
     const tags = await store.allTags(), tsel = $('#noteTag'); if (tsel.options.length !== tags.length + 1 || [...tsel.options].slice(1).some((o, i) => o.value !== tags[i][0])) { tsel.replaceChildren(h('option', { value: '' }, 'any tag'), ...tags.map(([g, n]) => h('option', { value: g, selected: g === tag }, `${g} (${n})`))); }
     const rows = recs.filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated).map(r => {
       const t = keys.get(r.key), pv = r.provenance;
       return h('div', { class: 'ncard' },
-        h('div', { class: 'nc-head' }, h('b', {}, t ? t.title : r.key.replace(/^file:|#\d*$/g, '')), h('span', { class: 'muted' }, t ? [t.artist, t.album].filter(Boolean).join(' · ') : 'not in the current library'), r.rating ? stars(h, r.rating, v => store.setRating(r.key, v)) : '', t ? h('button', { class: 'mini', onclick: () => player.playList([t], 0) }, '▶ play') : ''),
+        h('div', { class: 'nc-head' }, h('b', {}, t ? t.title : r.key.replace(/^file:|^album:|#\d*$/g, '')), r.key.startsWith('album:') ? h('span', { class: 'chip' }, 'album') : '', h('span', { class: 'muted' }, t ? [t.artist, t.album].filter(Boolean).join(' · ') : 'not in the current library'), r.rating ? stars(h, r.rating, v => store.setRating(r.key, v)) : '', t ? h('button', { class: 'mini', onclick: () => player.playList(t.isAlbum ? t.tracks : [t], 0) }, '▶ play') : ''),
         pv ? h('div', { class: 'nc-prov' }, h('span', { class: 'chip' }, KIND_LABEL[pv.kind] || pv.kind), ' ', [pv.date, pv.device, pv.venue, pv.source].filter(Boolean).join(' · '), pv.note ? ' — ' + pv.note : '') : '',
         r.tags.length || r.status ? h('div', {}, r.status ? h('span', { class: 'chip status' }, r.status) : '', ...r.tags.map(x => h('button', { class: 'chip tag', title: 'Filter by this tag', onclick: () => { $('#noteTag').value = x; paintLists(); } }, '#' + x))) : '',
         ...r.notes.slice(0, 4).map(n => h('div', { class: 'nc-note' }, h('span', { class: 'chip' }, n.at != null ? fmt(n.at) : 'whole'), ' ', n.text)), r.notes.length > 4 ? h('div', { class: 'muted small' }, `+ ${r.notes.length - 4} more`) : '');

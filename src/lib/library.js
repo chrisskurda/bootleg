@@ -101,7 +101,8 @@ export class Library extends EventTarget {
     t.nfo = { album: album && { ...album.parsed, path: album.src.path }, artist: artist && { ...artist.parsed, path: artist.src.path }, texts: texts.map(x => ({ text: x.parsed.text, path: x.src.path })) };
     if (this.nfoFill) {     // tags win; the NFO only fills what is missing
       const a = t.nfo.album, r = t.nfo.artist;
-      if (!t.album && a?.album) t.album = a.album; if (!t.artist && (a?.artist || r?.artist)) t.artist = a?.artist || r.artist; if (!t.year && a?.year) t.year = a.year; if (!t.genre && (a?.genres || r?.genres)?.length) t.genre = (a?.genres?.length ? a.genres : r.genres).join(', ');
+      const fill = (k, v) => { t[k] = v; (t._nfoFilled ||= new Set()).add(k); };      // remember which fields came from the NFO, so the UI can say so
+      if (!t.album && a?.album) fill('album', a.album); if (!t.artist && (a?.artist || r?.artist)) fill('artist', a?.artist || r.artist); if (!t.year && a?.year) fill('year', a.year); if (!t.genre && (a?.genres || r?.genres)?.length) fill('genre', (a?.genres?.length ? a.genres : r.genres).join(', '));
     }
   }
   setNfoOptions({ useNfo, nfoFill }) { this.useNfo = useNfo; this.nfoFill = nfoFill; this._nfoSoon(); }
