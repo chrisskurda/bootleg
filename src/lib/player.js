@@ -2,6 +2,10 @@
 // One AudioContext (the visualizer feed's) carries both, so the visualizer analyses whatever is playing.
 import { StemDeck } from './stems.js';
 
+// A blob: URL needs a media type or WebKit may refuse to play it (a fetched Response often has none).
+const MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', mp4: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf' };
+const mimeOf = (r, name) => { const h = (r.headers && r.headers.get && r.headers.get('content-type')) || ''; return /^audio\//.test(h) ? h.split(';')[0] : MIME[(name.split('.').pop() || '').toLowerCase()] || ''; };
+
 export class Player extends EventTarget {
   constructor(feed) {
     super(); this.feed = feed; feed._init();
@@ -76,7 +80,7 @@ export class Player extends EventTarget {
     clearTimeout(this._dog); a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
     const fallback = async why => {
       if (tok !== this._tok || this._blob || this.item !== cur) return;
-      try { const r = await (src.fetch ? src.fetch() : fetch(src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (tok === this._tok) { a.src = this._blob; if (this._wantPlay) a.play().catch(() => {}); } }
+      try { const r = await (src.fetch ? src.fetch() : fetch(src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: mimeOf(r, src.name) })); if (tok === this._tok) { a.src = this._blob; if (this._wantPlay) a.play().catch(() => {}); } }
       catch (e) { this._fail(`Could not play “${cur?.title || src.name}”: ${why}${e && e.message ? ' (' + e.message + ')' : ''}`); }
     };
     a.addEventListener('error', () => fallback(a.error ? `the player rejected it (code ${a.error.code})` : 'load error'), { once: true });

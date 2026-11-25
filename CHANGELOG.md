@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The README describes what bootleg is and how to run it.
 
 ### Fixed
+- Tracks played through the download fallback (servers without CORS, e.g. Navidrome, and WebKit/Linux) now carry their audio type; without it WebKit could refuse the file and nothing played.
 - The notes panel no longer rebuilds while you are typing in one of its fields (a rating, status or tag change elsewhere could wipe what you had just typed).
 
 ## [0.1.0] - 2026-11-25
