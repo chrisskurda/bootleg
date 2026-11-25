@@ -3,8 +3,10 @@
 # Makes fixtures (a tagged flac with cover, a stem render, a mock Subsonic server WITHOUT CORS), launches the app in
 # self-test mode (isolated in-memory profile), and fails unless every check passes. Needs ffmpeg + node; on Linux also xvfb.
 set -euo pipefail
+# GNU `timeout` is not on stock macOS (nor on GitHub's macOS runners): use it when there, else a small portable stand-in
+run_timeout() { local s=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$s" "$@"; else "$@" & local p=$!; ( sleep "$s"; kill "$p" 2>/dev/null ) & local k=$!; wait "$p"; local rc=$?; kill "$k" 2>/dev/null || true; return $rc; fi; }
 BIN="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; cd "$(dirname "$0")/.."
-T="$(mktemp -d)"; trap 'kill $MOCK $DLNA 2>/dev/null; wait $MOCK $DLNA 2>/dev/null; rm -rf "$T"' EXIT; mkdir -p "$T/L/A" "$T/S"
+T="$(mktemp -d)"; trap 'kill $MOCK $DLNA 2>/dev/null || true; wait $MOCK $DLNA 2>/dev/null || true; rm -rf "$T"' EXIT; mkdir -p "$T/L/A" "$T/S"
 ffmpeg -v error -y -f lavfi -i color=c=0xcc5533:s=200x200:d=1 -frames:v 1 "$T/c.png"
 ffmpeg -v error -y -f lavfi -i sine=frequency=330:duration=6 -i "$T/c.png" -map 0:a -map 1:v -c:a flac -c:v mjpeg -disposition:v attached_pic -metadata title="Self Test" -metadata artist=Tester "$T/L/A/st.flac"
 node vendor/bootleg-vizualizer/tests/make-fixture.mjs "$T/L/render" >/dev/null 2>&1
@@ -17,7 +19,7 @@ export BOOTLEG_SELFTEST_DLNA="$(sed 's/dlna: //' "$T/dlna.out")"
 export BOOTLEG_SELFTEST="$T/L" BOOTLEG_SELFTEST_OUT="$T/out.json" BOOTLEG_SELFTEST_SUBSONIC="$(sed 's/mock: //' "$T/mock.log")"
 RUN=("$BIN"); if [ "$(uname)" = Linux ]; then RUN=(xvfb-run -a -s "-screen 0 1400x900x24" dbus-run-session -- "$BIN"); fi
 # A freshly built macOS binary sometimes refuses its very first autoplay (WebKit policy); one retry is enough in practice.
-for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; timeout 150 "${RUN[@]}" >"$T/app.log" 2>&1 || true; grep -q 'player.playing' "$T/out.json" 2>/dev/null || break; echo "first launch could not autoplay — retrying once"; done
+for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; run_timeout 150 "${RUN[@]}" >"$T/app.log" 2>&1 || true; grep -q 'player.playing' "$T/out.json" 2>/dev/null || break; echo "first launch could not autoplay — retrying once"; done
 [ -f "$T/out.json" ] || { echo "no result — the app never finished its self-test"; tail -30 "$T/app.log"; exit 1; }
 cat "$T/out.json"; echo
 node -e '

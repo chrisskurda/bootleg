@@ -128,6 +128,8 @@ fn main() {
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
             if env::var("BOOTLEG_SELFTEST").is_ok() { b = b.initialization_script("window.__BOOTLEG_SELFTEST = true;"); }
             let w = b.build()?;
+            // The self-test plays audio with no user gesture; WebKit allows that only for an active app, so make sure it is frontmost
+            if env::var("BOOTLEG_SELFTEST").is_ok() { let _ = w.show(); let _ = w.set_always_on_top(true); let _ = w.set_focus(); #[cfg(target_os = "macos")] { let _ = app.handle().show(); } }
             let _ = w.set_focus();
             Ok(())
         })
