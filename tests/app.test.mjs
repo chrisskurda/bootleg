@@ -176,7 +176,7 @@ try {
   await bridgeRow.locator('input').check(); await pg.waitForFunction(() => window.__bootleg.extensions.running.has('bridge-thing'), null, { timeout: 8000 }); await sleep(600);
   t('turning it on connects to the bridgething app and publishes player state', got.some(m => m.type === 'state' && 'playing' in m && 'volume' in m), JSON.stringify(got[0] || {}).slice(0, 120));
   wsConn.send(JSON.stringify({ cmd: 'volume', to: 0.33 })); await pg.waitForFunction(() => Math.abs(window.__bootleg.player.volume - 0.33) < 0.001); t('commands from the device drive the player', true);
-  wsConn.send(JSON.stringify({ cmd: 'frames', on: true })); await sleep(900); t('the device can subscribe to spectrum frames (the extension taps the visualizer through the API)', got.some(m => m.type === 'frame' && m.spec.length === 64) && (await ev(() => window.__bootleg.viz.taps.size)) === 1);
+  wsConn.send(JSON.stringify({ cmd: 'frames', on: true })); await sleep(900); t('the device can subscribe to spectrum frames (the extension taps the visualizer through the API)', got.some(m => m.type === 'frame' && typeof m.s === 'string' && atob(m.s).length === 64 && Array.isArray(m.f)) && (await ev(() => window.__bootleg.viz.taps.size)) === 1);
   await pg.locator('#settingsBody .srow', { hasText: 'Car Thing bridge' }).locator('input').uncheck(); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('bridge-thing')); t('turning it off detaches it completely (no leftover frame tap)', (await ev(() => window.__bootleg.viz.taps.size)) === 0);
   await ev(() => window.__bootleg.player.setVolume(0.9));
 
