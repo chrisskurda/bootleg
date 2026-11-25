@@ -20,6 +20,8 @@
     <div id="sys" class="sys"></div>
   </header>
 
+  <div id="progress" class="progress" hidden role="status" aria-live="polite"><div class="pbar"><i id="pfill"></i></div><span id="ptext"></span></div>
+
   <div class="body">
     <nav class="side" aria-label="Library">
       <button class="nav on" data-view="tracks">Tracks <span id="nTracks" class="count"></span></button>
@@ -28,6 +30,7 @@
       <button class="nav" data-view="notes">Notes</button>
       <button class="nav" data-view="playlists">Playlists</button>
       <button class="nav" data-view="now">Now playing</button>
+      <button class="nav" data-view="settings">Settings</button>
       <div class="side-foot"><button id="notesExport" class="link">Export notes…</button><button id="notesImport" class="link">Import notes…</button><button id="forget" class="link" hidden>Forget library</button></div>
     </nav>
 
@@ -48,6 +51,8 @@
         <div class="toolbar"><input id="plName" placeholder="Name for the current queue…"><button id="plSave" class="btn primary">Save queue as playlist</button><button id="plImport" class="btn">Import M3U…</button></div>
         <div id="plList" class="cards"></div><div id="emptyPl" class="empty">No playlists yet. Fill the queue, name it above and save — or import an .m3u / .m3u8 from another player.</div>
       </section>
+
+      <section id="view-settings" class="view" hidden><div id="settingsBody" class="settings"></div></section>
 
       <section id="view-now" class="view" hidden>
         <div class="nowgrid">
@@ -95,7 +100,7 @@
 <input id="folderIn" type="file" webkitdirectory multiple hidden>
 <input id="m3uIn" type="file" accept=".m3u,.m3u8" multiple hidden>
 <input id="notesIn" type="file" accept=".json" hidden>
-<input id="filesIn" type="file" multiple hidden accept="audio/*,.flac,.m4a,.opus,.json">
+<input id="filesIn" type="file" multiple hidden accept="audio/*,.flac,.m4a,.opus,.json,.nfo">
 <script src="/vendor/bootleg-vizualizer/core/look.js"></script>
 <script src="/vendor/bootleg-vizualizer/core/meta.js"></script>
 <script src="/vendor/bootleg-vizualizer/core/stems.js"></script>

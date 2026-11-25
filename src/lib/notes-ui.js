@@ -1,4 +1,5 @@
 // Notes, ratings, provenance, playlists and import/export — the cataloguing side of the player.
+import { parseNfo, buildAlbumNfo, nfoRatingToStars } from './nfo.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
 export const trackKey = t => !t ? null : t.kind === 'render' ? 'render:' + t.dir : 'file:' + (t.src?.path || t.title) + '#' + (t.src?.size ?? '');
@@ -51,6 +52,7 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
         h('div', { class: 'provgrid' },
           h('label', { class: 'f' }, h('span', {}, 'Kind'), h('select', { onchange: e => store.patchProvenance(curKey, { kind: e.target.value }) }, ...PROVENANCE_KINDS.map(k => h('option', { value: k, selected: k === pv.kind }, KIND_LABEL[k])))),
           field('date', 'Date', '', 'date'), field('device', 'Device / gear', 'Technics SL-1200 → Audient iD14'), field('venue', 'Venue / place', 'Where it was recorded or bought'), field('source', 'Source', 'Disc, seller, mix-CD title, URL…'), field('note', 'Notes on the transfer', 'cleaned stylus, azimuth fixed…'))),
+      nfoBlock(it),
       h('div', { class: 'composer' }, ta,
         h('div', { class: 'cbtns' },
           h('button', { class: 'btn primary', onclick: () => add(player.pos()) }, `Add at ${fmt(player.pos())}`),
@@ -58,6 +60,21 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
           h('button', { class: 'btn', onclick: () => add(null, null) }, 'Add to whole recording'))),
       h('div', { class: 'notelist' }, list.length ? list : h('div', { class: 'muted small' }, 'No notes yet. Notes with a time appear as markers on the seek bar.')));
     function e2() { paint(); }
+  }
+  // ---- .nfo: show what the folder's NFO files say, import it as notes, or write an album.nfo from what we know
+  const dirOf = p => p.slice(0, Math.max(0, p.lastIndexOf('/')));
+  function nfoBlock(it) {
+    const n = it.nfo, parts = [];
+    if (n) {
+      const a = n.album, r = n.artist;
+      if (a?.text) parts.push(h('div', {}, h('div', { class: 'lbl' }, `Album — ${a.path.split('/').pop()}`), h('div', { class: 'nfotext' }, a.text)));
+      if (r?.text) parts.push(h('div', {}, h('div', { class: 'lbl' }, `Artist — ${r.path.split('/').pop()}`), h('div', { class: 'nfotext' }, r.text)));
+      for (const t of n.texts) parts.push(h('div', {}, h('div', { class: 'lbl' }, t.path.split('/').pop()), h('div', { class: 'nfotext mono' }, t.text)));
+    }
+    const sibs = () => lib.tracks.filter(t => dirOf(t.src.path) === dirOf(it.src.path)).sort((x, y) => (x.disc - y.disc) || (x.track - y.track) || x.title.localeCompare(y.title));
+    const importIt = async () => { let c = 0; for (const x of [n.album?.text, n.artist?.text, ...n.texts.map(t => t.text)].filter(Boolean)) { await store.addNote(curKey, { text: x, kind: 'nfo' }); c++; } if (n.album?.rating && !cur.rating) await store.setRating(curKey, nfoRatingToStars(n.album.rating)); toast(`Imported ${c} note(s) from .nfo`); };
+    const exportIt = () => { const whole = cur.notes.filter(x => x.at == null).map(x => x.text).join('\n\n'); saveText('album.nfo', buildAlbumNfo({ album: it.album || dirOf(it.src.path).split('/').pop(), artist: it.albumArtist || it.artist, year: it.year, genres: (it.genre || '').split(/\s*,\s*/).filter(Boolean), rating: cur.rating, review: whole || n?.album?.text, tracks: sibs().map(t => ({ position: t.track || undefined, title: t.title, duration: t.duration ? fmt(t.duration) : '' })) }), 'text/xml', it.kind === 'track' && it.src.kind === 'tauri' ? dirOf(it.src.path) + '/album.nfo' : null); };
+    return h('div', { class: 'nfo' }, ...parts, h('div', { class: 'cbtns' }, n && parts.length ? h('button', { class: 'btn', onclick: importIt }, 'Import .nfo text as notes') : '', it.kind === 'track' ? h('button', { class: 'btn', title: 'Writes a Kodi-style album.nfo with this album, its rating and your whole-recording notes', onclick: exportIt }, 'Save album.nfo…') : ''));
   }
   function noteRow(n) {
     const row = h('div', { class: 'note' });

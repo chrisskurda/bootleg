@@ -118,3 +118,14 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; } .toolbar input[type=search], .toolbar input:not([type]) { flex: 1; min-width: 200px; }
 .ncard { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; } .nc-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .nc-prov, .nc-note { font-size: 12px; color: var(--muted); }
 .side-foot { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+/* import progress */
+.progress { display: flex; align-items: center; gap: 12px; padding: 6px 14px; background: #121626; border-bottom: 1px solid var(--line); flex: none; font-size: 12px; color: var(--muted); }
+.pbar { flex: none; width: 220px; height: 6px; border-radius: 99px; background: var(--panel2); overflow: hidden; position: relative; } .pbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.progress.indet .pbar i { position: absolute; width: 35%; animation: slide 1.1s ease-in-out infinite alternate; } @keyframes slide { from { left: 0; } to { left: 65%; } }
+
+/* settings */
+.settings { max-width: 760px; } .settings h3 { margin: 22px 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.srow { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; }
+.srow small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; max-width: 520px; } .srow input[type=number] { width: 80px; } .sbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.nfo { margin: 10px 0; display: flex; flex-direction: column; gap: 8px; } .nfotext { white-space: pre-wrap; background: var(--panel2); border-radius: 8px; padding: 8px 10px; max-height: 180px; overflow: auto; font-size: 12.5px; } .nfotext.mono { font-size: 11px; }

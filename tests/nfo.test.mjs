@@ -1,0 +1,14 @@
+import { parseNfo, buildAlbumNfo, buildArtistNfo, nfoRatingToStars } from '../src/lib/nfo.js';
+let bad = 0; const t = (n, ok, note = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${note ? '   ' + note : ''}`); if (!ok) bad++; };
+const kodi = `<?xml version="1.0" encoding="UTF-8"?>\n<album>\n <title>Funk &amp; Report</title><artist>The Quarterlies</artist><year>2026</year><genre>Funk / Soul</genre><genre>Rock</genre><label>Basement</label><rating>8.0</rating>\n <review><![CDATA[Recorded <live> in one take.]]></review>\n <track><position>1</position><title>Café</title><duration>3:20</duration></track><track><position>2</position><title>Second</title></track>\n</album>`;
+const a = parseNfo(kodi);
+t('Kodi album.nfo: fields, entities, CDATA, genres split', a.kind === 'album' && a.album === 'Funk & Report' && a.artist === 'The Quarterlies' && a.year === 2026 && a.genres.join() === 'Funk,Soul,Rock' && a.label === 'Basement' && a.text === 'Recorded <live> in one take.');
+t('tracks listed inside the album are not mistaken for album fields', a.tracks.length === 2 && a.tracks[0].title === 'Café' && a.album === 'Funk & Report');
+t('rating converts 0–10 to stars', a.rating === 8 && nfoRatingToStars(a.rating) === 4 && nfoRatingToStars(7) === 3.5);
+const ar = parseNfo('<artist><name>The Quarterlies</name><genre>Funk</genre><biography>Formed in a basement.</biography></artist>'); t('artist.nfo', ar.kind === 'artist' && ar.artist === 'The Quarterlies' && ar.text.startsWith('Formed'));
+const tx = parseNfo('﻿  ░▒▓ RELEASE INFO ▓▒░\r\nRipped from vinyl, 2026-03-02\r\n'); t('plain-text / scene NFO is kept as text', tx.kind === 'text' && tx.text.includes('Ripped from vinyl') && !tx.text.includes('\r'));
+t('garbage never throws', parseNfo('<album><title>x').kind === 'text' && parseNfo(null).kind === 'text');
+const b = parseNfo(buildAlbumNfo({ album: 'A & B', artist: 'Me', year: 2025, genres: ['Jazz'], rating: 4.5, review: 'x < y', tracks: [{ title: 'One', duration: '1:00' }] }));
+t('build → parse round trip (escaping, rating, tracks)', b.album === 'A & B' && b.rating === 9 && b.text === 'x < y' && b.tracks[0].title === 'One' && b.year === 2025);
+t('artist nfo builds', parseNfo(buildArtistNfo({ name: 'Me', biography: 'bio' })).text === 'bio');
+console.log(bad ? `\n${bad} FAILED` : '\nall nfo tests pass'); process.exit(bad ? 1 : 0);

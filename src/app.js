@@ -5,7 +5,8 @@ import { Player } from '/lib/player.js';
 import { VizHost } from '/lib/viz.js';
 import { h } from '/lib/controls.js';
 import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
-import { AUDIO_RE, sourcesFromFiles, webSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
+import { LibCache, NullCache } from '/lib/cache.js';
+import { AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -19,7 +20,7 @@ const store = { get: (k, d) => { try { const v = localStorage.getItem('bootleg.'
 let view = 'tracks';
 function show(v) {
   view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v));
-  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') buildStems(); renderAll();
+  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') buildStems(); if (v === 'settings') paintSettings(); renderAll();
 }
 $$('.nav').forEach(b => b.onclick = () => show(b.dataset.view)); $('#np').onclick = () => show('now');
 
@@ -58,13 +59,29 @@ let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTime
 $('#search').oninput = () => renderAll();
 
 // ------------------------------------------------------------------ adding music
+const DEFAULTS = { cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const settings = { ...DEFAULTS, ...store.get('settings', {}) };
+let cache; try { cache = settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
+function applySettings() { lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
+let rescanTimer = 0; function armRescan() { clearInterval(rescanTimer); rescanTimer = 0; if (TAURI && settings.rescanMinutes > 0) rescanTimer = setInterval(() => syncAll(true), settings.rescanMinutes * 60000); }
+const scan = { on: false, text: '' };
+function paintProgress() {
+  const pr = $('#progress'), left = lib._q.length + lib._busy; let text = '', frac = null;
+  if (scan.on) text = scan.text; else if (left) { text = `Reading tags… ${lib.done.toLocaleString()} of ${lib.total.toLocaleString()}`; frac = lib.total ? lib.done / lib.total : 0; }
+  pr.hidden = !text; if (!text) return; $('#ptext').textContent = text; pr.classList.toggle('indet', frac == null); $('#pfill').style.width = frac == null ? '' : Math.round(frac * 100) + '%';
+}
+setInterval(paintProgress, 150);
 async function addSources(sources, label) {
   if (!sources.length) return toast('No music found there', true);
-  const r = await lib.add(sources); toast(`${label || 'Added'}: ${r.tracks} tracks, ${r.renders} renders`); renderAll();
+  const r = await lib.add(sources); paintProgress(); toast(`${label || 'Added'}: ${r.tracks} tracks, ${r.renders} renders`); renderAll();
+}
+async function scanFolder(dir) {
+  scan.on = true; scan.text = 'Scanning folder…'; paintProgress();
+  try { return await scanFolderTauri(dir, ({ dirs, files }) => { scan.text = `Scanning ${dir.split('/').pop()}… ${files.toLocaleString()} audio files in ${dirs.toLocaleString()} folders`; }); } finally { scan.on = false; }
 }
 async function addFolderDesktop() {
   const dir = await TAURI.dialog.open({ directory: true, multiple: false, title: 'Add a music folder' }); if (!dir) return;
-  const roots = store.get('roots', []); if (!roots.includes(dir)) { roots.push(dir); store.set('roots', roots); } await addSources(await scanFolderTauri(dir), 'Scanned');
+  const roots = store.get('roots', []); if (!roots.includes(dir)) { roots.push(dir); store.set('roots', roots); } const srcs = await scanFolder(dir); await addSources(srcs, 'Scanned'); cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))).catch(() => {});
 }
 async function addFilesDesktop() {
   const picked = await TAURI.dialog.open({ multiple: true, title: 'Add music files', filters: [{ name: 'Audio', extensions: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'aif', 'aiff', 'caf'] }] }); if (!picked) return;
@@ -74,7 +91,17 @@ $('#addFolder').onclick = () => (TAURI ? addFolderDesktop().catch(e => toast(Str
 $('#addFiles').onclick = () => (TAURI ? addFilesDesktop().catch(e => toast(String(e), true)) : $('#filesIn').click());
 $('#folderIn').onchange = e => { addSources(sourcesFromFiles(e.target.files), 'Scanned'); e.target.value = ''; };
 $('#filesIn').onchange = e => { addSources(sourcesFromFiles(e.target.files)); e.target.value = ''; };
-$('#forget').onclick = () => { store.set('roots', []); lib.clear(); player.clear(); renderAll(); toast('Library forgotten'); };
+$('#forget').onclick = async () => { for (const r of store.get('roots', [])) await cache.delIndex(r).catch(() => {}); store.set('roots', []); lib.clear(); player.clear(); renderAll(); toast('Library forgotten'); };
+
+// Desktop: show the whole library from the cache immediately, then look for changes in the background.
+async function restoreFromCache() { for (const ix of await cache.indexes()) { try { await TAURI.core.invoke('allow_path', { path: ix.root }); lib.add(ix.entries.map(e => tauriSource(e.path, e.size, e.mtime))); } catch (e) { console.warn('cached root unavailable', ix.root, e); } } renderAll(); }
+let syncing = false;
+async function syncAll(quiet = false) {
+  if (!TAURI || syncing) return; syncing = true; let added = 0, removed = 0;
+  try { for (const root of store.get('roots', [])) { try { const before = lib.tracks.length, srcs = await scanFolder(root, 'Checking for changes in'); lib.add(srcs); removed += lib.removeMissing(root, new Set(srcs.map(x => x.path))); added += Math.max(0, lib.tracks.length - before); await cache.putIndex(root, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); } catch (e) { console.warn('could not rescan', root, e); } } }
+  finally { syncing = false; }
+  if (!quiet || added || removed) toast(added || removed ? `Library updated: ${added} new, ${removed} removed` : 'Library is up to date'); renderAll(); if (view === 'settings') paintSettings();
+}
 
 // drag & drop: files and folders in the browser; paths from Tauri on the desktop
 async function filesFromDrop(dt) {
@@ -83,13 +110,13 @@ async function filesFromDrop(dt) {
     else if (entry.isDirectory) { const rd = entry.createReader(); for (;;) { const batch = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!batch.length) break; for (const c of batch) await walk(c, base + entry.name + '/'); } }
   };
   for (const it of dt.items || []) { const e = it.webkitGetAsEntry?.(); if (e) await walk(e, ''); }
-  return out.filter(s => AUDIO_RE.test(s.name) || s.name === 'manifest.json' || s.name === 'clips.json');
+  return out.filter(s => wanted(s.name));
 }
 addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drop'); });
 addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('drop'); });
 addEventListener('drop', async e => { e.preventDefault(); document.body.classList.remove('drop'); if (!TAURI) addSources(await filesFromDrop(e.dataTransfer), 'Dropped'); });
 if (TAURI?.event) TAURI.event.listen('tauri://drag-drop', async ev => {
-  document.body.classList.remove('drop'); const sources = []; for (const p of ev.payload.paths || []) { try { const st = await TAURI.fs.stat(p); if (st.isDirectory) sources.push(...await scanFolderTauri(p)); else sources.push(...await sourcesFromPathsTauri([p])); } catch (err) { toast(String(err), true); } } addSources(sources, 'Dropped');
+  document.body.classList.remove('drop'); const sources = []; for (const p of ev.payload.paths || []) { try { const st = await TAURI.fs.stat(p); if (st.isDirectory) sources.push(...await scanFolder(p)); else sources.push(...await sourcesFromPathsTauri([p])); } catch (err) { toast(String(err), true); } } addSources(sources, 'Dropped');
 });
 
 // ------------------------------------------------------------------ player bar
@@ -147,9 +174,28 @@ addEventListener('keydown', e => {
   else if (e.key === 'f' && view === 'now') viz.fullscreen(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
 });
 
+// ------------------------------------------------------------------ settings
+async function paintSettings() {
+  const box = $('#settingsBody'), st = await cache.stats(), row = (label, hint, input) => h('label', { class: 'srow' }, h('span', {}, h('b', {}, label), hint ? h('small', {}, hint) : ''), input);
+  const chk = k => h('input', { type: 'checkbox', checked: !!settings[k], onchange: e => { settings[k] = e.target.checked; applySettings(); } });
+  const num = (k, min, max) => h('input', { type: 'number', min, max, value: settings[k], onchange: e => { settings[k] = Math.max(min, Math.min(max, +e.target.value || 0)); applySettings(); } });
+  box.replaceChildren(
+    h('h3', {}, 'Library scanning'),
+    row('Remember the library (cache)', 'Tags, covers and the file list are kept on this device, so the library appears instantly next time. Takes effect after a restart.', chk('cacheEnabled')),
+    row('Check for changes on startup', TAURI ? 'Looks for added, changed and removed files in the background.' : 'Desktop app only — a browser cannot see the disk without being given files.', chk('scanOnStart')),
+    row('Re-check every N minutes', '0 = only on startup or when you ask.', num('rescanMinutes', 0, 1440)),
+    row('Tag-reading parallelism', 'Higher is faster on fast disks; lower is gentler on network drives.', num('tagConcurrency', 1, 32)),
+    h('h3', {}, '.nfo files'),
+    row('Read .nfo files', 'album.nfo / artist.nfo (Kodi style) and plain-text .nfo in your folders: shown with the track and searchable.', chk('useNfo')),
+    row('Fill missing tags from .nfo', 'Tags in the files always win; an .nfo only supplies what is missing (album, artist, year, genre).', chk('nfoFill')),
+    h('h3', {}, 'Maintenance'),
+    h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'Cache'), h('small', {}, `${st.files.toLocaleString()} files remembered · ${st.covers.toLocaleString()} covers · ${st.indexed.toLocaleString()} files indexed in ${st.roots} folders`)),
+      h('span', { class: 'sbtns' }, h('button', { class: 'btn', disabled: !TAURI, onclick: () => syncAll() }, 'Check for changes now'), h('button', { class: 'btn', onclick: async () => { await cache.clear(); lib.fileCache.clear(); toast('Cache cleared — tags will be re-read on the next scan'); paintSettings(); } }, 'Clear cache'))));
+}
+
 // ------------------------------------------------------------------ notes, ratings, playlists
-async function saveText(name, text, mime) {
-  if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
+async function saveText(name, text, mime, fullPath) {
+  if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: fullPath || name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
 const notes = initNotes({ player, lib, h, fmt, toast, show, saveText, $ });
@@ -162,6 +208,7 @@ async function selfTest(dir) {
     out.tracks = lib.tracks.length; out.renders = lib.renders.length; out.firstTitle = lib.sortedTracks()[0]?.title; out.cover = lib.tracks.some(t => !!t.coverUrl);
     if (lib.tracks.length) { await player.playList(lib.sortedTracks(), 0); await wait(() => player.playing && player.pos() > 0.7); let peak = 0; for (let i = 0; i < 20; i++) { const A = feed.update(0.05); peak = Math.max(peak, ...A.spectrum); await new Promise(r => setTimeout(r, 50)); } out.pos = player.pos(); out.peak = peak; out.mode = player.mode; }
     if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing && player.pos() > 0.7); out.stems = player.deck.stems.length; }
+    { await lib.flush(); const read = lib.stats.read, srcs = await scanFolder(dir); lib.clear(); lib.add(srcs); await wait(() => lib.tracks.every(t => t.tagged)); out.cachedRescan = lib.stats.read === read && lib.stats.cached >= out.tracks; out.cacheFiles = (await cache.stats()).files; await cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); lib.clear(); const r0 = lib.stats.read; await restoreFromCache(); await wait(() => lib.tracks.every(t => t.tagged)); out.restored = lib.tracks.length === out.tracks && lib.renders.length === out.renders && lib.stats.read === r0; }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -171,8 +218,8 @@ async function selfTest(dir) {
 // ------------------------------------------------------------------ start
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
-  await viz.init(); updateBar(); renderAll();
-  if (TAURI) for (const dir of store.get('roots', [])) { try { await lib.add(await scanFolderTauri(dir)); } catch (e) { console.warn('could not rescan', dir, e); } }
-  if (TAURI) { const dir = await TAURI.core.invoke('selftest_config'); if (dir) selfTest(dir); }
-  window.__bootleg = { notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  await viz.init(); await lib.attachCache(cache).catch(() => {}); applySettings(); updateBar(); renderAll();
+  const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
+  else if (TAURI) (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
+  window.__bootleg = { settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

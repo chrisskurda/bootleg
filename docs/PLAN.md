@@ -52,3 +52,9 @@ Later: Subsonic source, source/stem-format plugin interface, spectrum over postM
 - **macOS (arm64):** `npx tauri build` → `src-tauri/target/release/bundle/macos/bootleg.app`; verified with the headless self-test.
 - **Linux (arm64 container, WebKitGTK):** `scripts/linux/test.sh` builds in Docker and runs the self-test under Xvfb — passes. WebKitGTK can't stream from `asset://`, so the player falls back to a blob URL when the media element rejects it. Not yet tried: x86_64 Linux, packaging (.deb/AppImage), real audio output.
 - **Android:** later (Tauri 2 mobile); needs a different file-access model (SAF) — the source plugin interface should keep that in mind.
+
+## Scanning, cache and .nfo (v0.2)
+- **Import progress:** folder scans report files/folders found (8 parallel readers); tag reading shows "N of M" with a bar.
+- **Cached, incremental library:** IndexedDB remembers tags, 512px cover thumbnails, parsed .nfo and each root's file index (validated by size + mtime). On startup the desktop app shows the whole library from the cache at once, then checks for added/changed/removed files in the background (`syncAll`). Unchanged files are never re-read.
+- **Settings view:** remember library, check on startup, re-check every N minutes, tag-read parallelism, read .nfo, fill missing tags from .nfo, check now, clear cache.
+- **.nfo:** Kodi-style album.nfo/artist.nfo and plain-text .nfo in track folders (or above) fill *missing* tags only and show on the Now-playing panel; "Import .nfo text as notes" and "Save album.nfo…" (writes Kodi XML from the album, rating and whole-recording notes). Build: `tauri build` now runs `scripts/build.mjs` first (it previously packaged a stale `dist/`).
