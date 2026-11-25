@@ -7,7 +7,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://git.skurda.org/chris/bootleg.git"
+    "url": "https://github.com/chrisskurda/bootleg.git"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

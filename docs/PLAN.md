@@ -2,7 +2,7 @@
 
 ## What it is
 One player, two shells: a web app, and the same app in a Tauri window. It plays ordinary music files and MusicGen stem renders, shows visualizers
-from [bootleg-vizualizer](https://git.skurda.org/chris/bootleg-vizualizer.git), and can browse a Subsonic server.
+from [bootleg-vizualizer](https://github.com/chrisskurda/bootleg-vizualizer), and can browse a Subsonic server.
 
 ## Formats
 - **Standard**: mp3, flac, m4a/aac, ogg/opus, wav. Tags (ID3, Vorbis comments, MP4 atoms) and embedded cover art.

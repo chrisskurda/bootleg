@@ -28,5 +28,5 @@ First release: a music player for large libraries, with stem mixing, notes and l
 ### Fixed
 - Playback no longer waits for a stream to finish loading before starting, falls back to downloading the file when a stream is blocked or stalls, and shows a message saying why a track can't play instead of failing silently.
 
-[Unreleased]: https://git.skurda.org/chris/bootleg/compare/v0.1.0...HEAD
-[0.1.0]: https://git.skurda.org/chris/bootleg/releases/tag/v0.1.0
+[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/chrisskurda/bootleg/releases/tag/v0.1.0
