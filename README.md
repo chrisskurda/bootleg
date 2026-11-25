@@ -29,4 +29,4 @@ npx tauri build        # the desktop app (needs Rust; see src-tauri/)
 
 ## Related
 - [bootleg-vizualizer](https://github.com/chrisskurda/bootleg-vizualizer) — the pack format, runtime and packs
-- [bootleg-vizualizer-videocreator](https://git.skurda.org/chris/bootleg-vizualizer-videocreator.git) — renders packs to video
+- [bootleg-bridge-thing](https://github.com/chrisskurda/bootleg-bridge-thing) — a Spotify Car Thing remote: controls bootleg and shows its visualizers (connects through the optional Car Thing bridge extension)
