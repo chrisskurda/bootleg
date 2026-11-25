@@ -133,3 +133,4 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 /* libraries */
 .libsel { max-width: 180px; font-weight: 600; } .chip.kind { color: #7fd6ff; } .chip.status { color: var(--ok); } button.chip.tag { cursor: pointer; } button.chip.tag:hover { color: var(--accent); }
 .lib-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; } .lib-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; } .lib-head input { flex: 1; min-width: 140px; } .lib-roots { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; } .lib-roots code { word-break: break-all; }
+.connect { display: flex; flex-direction: column; gap: 8px; } .cfields { display: flex; flex-direction: column; gap: 8px; max-width: 420px; } .err { color: var(--bad); font-size: 12px; min-height: 0; }

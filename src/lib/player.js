@@ -45,8 +45,8 @@ export class Player extends EventTarget {
   // fetch the file once (the asset protocol does allow that) and play it from a blob: URL instead.
   async _setSrc(item) {
     const a = this.audio; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
-    a.src = item.src.url(); if (item.src.kind !== 'tauri') return;
-    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { this._blob = URL.createObjectURL(await (await fetch(item.src.url())).blob()); if (this.item === item) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
+    a.src = item.src.url(); if (item.src.kind !== 'tauri' && item.src.kind !== 'remote') return;
+    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { const r = await (item.src.fetch ? item.src.fetch() : fetch(item.src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (this.item === item) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
   }
   play() { this.feed.ctx.resume(); if (this.mode === 'deck') this.deck.play(); else this.audio.play().catch(() => {}); this._emit(); }
   pause() { if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }

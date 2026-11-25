@@ -1,5 +1,6 @@
 // End-to-end: build the app, serve it, drive it in Chrome with real files (tagged flac/mp3/m4a with covers + a stem render folder).
 //   node tests/app.test.mjs [--shots DIR]
+import { startMock } from './mock-subsonic.mjs';
 import { chromium } from 'playwright-core'; import { spawn, spawnSync } from 'node:child_process'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), si = process.argv.indexOf('--shots'), shots = si > 0 ? path.resolve(process.argv[si + 1]) : null; if (shots) fs.mkdirSync(shots, { recursive: true });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootleg-e2e-')), lib = path.join(tmp, 'Library'), PORT = 8700 + Math.floor(Math.random() * 90);
@@ -154,6 +155,29 @@ try {
   await pg.click('.nav[data-view="notes"]'); await pg.waitForSelector('#noteCards .ncard'); const tagOpts = await ev(() => [...document.querySelectorAll('#noteTag option')].map(o => o.value)); t('tags are global: the tag filter lists tags from every library', tagOpts.includes('wip') && tagOpts.includes('funk'), tagOpts.join());
   await pg.selectOption('#noteStatus', 'mixing'); await sleep(300); t('the Notes view filters by status', (await pg.locator('#noteCards .ncard').count()) === 1);
   await pg.selectOption('#noteStatus', ''); await pg.selectOption('#libSel', 'all'); await sleep(300); t('"All libraries" shows every track', (await ev(() => window.__bootleg.lib.visibleTracks.length)) === (await ev(() => window.__bootleg.lib.tracks.length)));
+
+  // ---- Subsonic source plugin (against a mock server)
+  const sdir = path.join(tmp, 'srv'); fs.mkdirSync(sdir); const files = {}; for (const [id, f] of [['s1', 330], ['s2', 440], ['s3', 550], ['s4', 660]]) { files[id] = path.join(sdir, id + '.flac'); ff('-f', 'lavfi', '-i', `sine=frequency=${f}:duration=5`, '-c:a', 'flac', files[id]); }
+  const song = (id, title, album, albumId, track) => ({ id, title, artist: 'Server Band', album, albumId, track, suffix: 'flac', duration: 5, size: fs.statSync(files[id]).size, created: '2026-01-0' + track + 'T00:00:00Z', coverArt: albumId, genre: 'Funk', year: 2024 });
+  const mock = await startMock({ songs: [song('s1', 'Remote One', 'Cloud Album', 'al1', 1), song('s2', 'Remote Two', 'Cloud Album', 'al1', 2), song('s3', 'Solo Cloud', 'Other Album', 'al2', 1)], files, cover: path.join(tmp, 'a.png') });
+  await pg.click('.nav[data-view="settings"]'); await pg.fill('#newLibName', 'Server'); await pg.click('#newLibBtn'); const sid = await ev(() => window.__bootleg.libs.active); await pg.click('#connectOpen-' + sid);
+  await pg.fill('input[name=url]', mock.url); await pg.fill('input[name=username]', 'alice'); await pg.fill('input[name=password]', 'wrong'); await pg.click('.connect .btn.primary'); await pg.waitForSelector('.connect .err:not(:empty)');
+  t('a wrong password is reported with the server’s message and nothing is added', /Wrong username or password/.test(await pg.locator('.connect .err').innerText()) && (await ev(() => window.__bootleg.libs.allConnections().length)) === 0);
+  await pg.fill('input[name=password]', 'secret'); await pg.click('.connect .btn.primary'); await pg.waitForFunction(() => window.__bootleg.lib.visibleTracks.length === 3, null, { timeout: 20000 });
+  const rt = await ev(() => window.__bootleg.lib.visibleTracks.map(x => [x.title, x.artist, x.album, x.src.kind, !!x.coverUrl, x.genre, x.year, x.duration].join('|')).sort());
+  t('connecting lists the server\'s tracks with tags, cover art and duration — nothing read from files', rt.length === 3 && rt[0] === 'Remote One|Server Band|Cloud Album|remote|true|Funk|2024|5', rt[0]);
+  t('the password is never stored (only a salted token)', !(await ev(() => localStorage.getItem('bootleg.libraries'))).includes('secret') && /"token":"[0-9a-f]{32}"/.test(await ev(() => localStorage.getItem('bootleg.libraries'))));
+  await pg.click('.nav[data-view="tracks"]'); await pg.waitForSelector('#trackList .row'); await pg.locator('#trackList .row', { hasText: 'Remote One' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.5, null, { timeout: 20000 });
+  const pk = await ev(async () => { let m = 0; for (let i = 0; i < 20; i++) { m = Math.max(m, ...window.__bootleg.feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } return m; });
+  t('a server track plays and the visualizer hears it (CORS-clean analyser)', pk > 0.2, 'peak ' + pk.toFixed(2));
+  await ev(async () => window.__bootleg.notes.store.setRating(window.__bootleg.player.item ? 'file:' + window.__bootleg.player.item.src.path + '#' + window.__bootleg.player.item.src.size : 'x', 4));
+  await pg.reload(); await pg.waitForFunction(() => window.__bootleg && window.__bootleg.lib.tracks.length === 3, null, { timeout: 15000 });
+  t('after a restart the remote library is back from the cache (no re-reading of files, no password asked)', (await ev(() => window.__bootleg.lib.tracks.every(x => x.tagged && x.src.kind === 'remote'))) && (await ev(() => window.__bootleg.libs.active)) === sid);
+  t('annotations on a server track survive too (keyed by the track\'s stable path)', (await ev(async () => (await window.__bootleg.notes.store.export()).tracks.some(x => x.key.startsWith('file:subsonic:') && x.rating === 4))));
+  mock.state.songs.push(song('s4', 'Fresh Upload', 'Other Album', 'al2', 2)); mock.state.songs = mock.state.songs.filter(x => x.id !== 's2');
+  await ev(() => window.__bootleg.syncAll()); await pg.waitForFunction(() => window.__bootleg.lib.tracks.length === 3 && window.__bootleg.lib.tracks.some(x => x.title === 'Fresh Upload') && !window.__bootleg.lib.tracks.some(x => x.title === 'Remote Two'), null, { timeout: 15000 });
+  t('"check for changes" picks up a new upload and a removed track on the server', true);
+  mock.close();
   t('no console or page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { t('test run completed without throwing', false, String(e.message).split('\n')[0]); if (shots) await pg.screenshot({ path: path.join(shots, 'failure.png') }).catch(() => {}); }
 await finish();

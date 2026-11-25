@@ -28,6 +28,10 @@ fn allow_path(app: AppHandle, path: String) -> Result<(), String> {
 #[tauri::command]
 fn selftest_config() -> Option<String> { env::var("BOOTLEG_SELFTEST").ok() }
 
+/// Some(url) when the self-test should also exercise a Subsonic server (BOOTLEG_SELFTEST_SUBSONIC).
+#[tauri::command]
+fn selftest_subsonic() -> Option<String> { env::var("BOOTLEG_SELFTEST_SUBSONIC").ok() }
+
 #[tauri::command]
 fn selftest_done(app: AppHandle, result: String) {
     if let Ok(out) = env::var("BOOTLEG_SELFTEST_OUT") { let _ = fs::write(out, result); }
@@ -38,7 +42,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![allow_path, selftest_config, selftest_done])
+        .plugin(tauri_plugin_http::init())
+        .invoke_handler(tauri::generate_handler![allow_path, selftest_config, selftest_subsonic, selftest_done])
         .setup(|app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);

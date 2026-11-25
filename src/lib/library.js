@@ -56,11 +56,12 @@ export class Library extends EventTarget {
     }
     for (const s of fresh) {
       if (NFO_RE.test(s.name)) { const n = { kind: 'nfo', src: s, dir: dirOf(s.path), parsed: null }; this._byPath.set(s.path, n); this._enqueue(() => this._loadNfo(n)); continue; }
-      if (!AUDIO_RE.test(s.name) || renderDirs.some(d => s.path.startsWith(d + '/'))) continue;     // plain tracks: audio that is not part of a render
+      if (!(s.meta || AUDIO_RE.test(s.name)) || renderDirs.some(d => s.path.startsWith(d + '/'))) continue;     // plain tracks: audio that is not part of a render
       const t = { id: 't' + (++this._n), kind: 'track', src: s, title: stem(s.name), artist: '', album: '', year: '', track: 0, disc: 0, genre: '', bpm: undefined, key: '', duration: undefined, coverUrl: null, tagged: false, nfo: null, libs: new Set([libId]) };
       this.tracks.push(t); this._byPath.set(s.path, t);
       const rec = this.fileCache.get(s.path);
-      if (rec && rec.kind === 'track' && same(rec, s)) { this._applyTags(t, rec.data); this.stats.cached++; } else this._enqueue(() => this._loadTags(t));
+      if (s.meta) this._applyRemote(t, s);
+      else if (rec && rec.kind === 'track' && same(rec, s)) { this._applyTags(t, rec.data); this.stats.cached++; } else this._enqueue(() => this._loadTags(t));
     }
     this._changed(); return { tracks: this.tracks.length, renders: this.renders.length };
   }
@@ -68,6 +69,8 @@ export class Library extends EventTarget {
   _pump() {
     while (this._busy < this.concurrency && this._q.length) { const j = this._q.shift(); this._busy++; j().catch(() => {}).finally(() => { this._busy--; this.done++; if (!this._busy && !this._q.length) this.flush(); this._changed(); this._pump(); }); }
   }
+  // Items from a source plugin arrive already tagged (nothing to read from a file).
+  _applyRemote(t, s) { const { coverUrl, remote, ...tags } = s.meta; Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; this._nfoFor(t); }
   _applyTags(t, data) {
     Object.assign(t, { tagged: true }, data.tags); t.track = t.track || 0; t.disc = t.disc || 0; if (!t.title) t.title = stem(t.src.name); t.coverUrl = data.coverKey ? this._covers.get(data.coverKey) || null : null; this._nfoFor(t);
   }
@@ -105,7 +108,7 @@ export class Library extends EventTarget {
 
   // ---- keeping up with the disk
   _update(old, s) {
-    old.src = s; if (old.kind === 'track') { old.tagged = false; this._enqueue(() => this._loadTags(old)); } else if (old.kind === 'nfo') this._enqueue(() => this._loadNfo(old)); else if (old.kind === 'render') { old.src = s; this._enqueue(() => this._loadRender(old)); }
+    old.src = s; if (old.kind === 'track' && s.meta) this._applyRemote(old, s); else if (old.kind === 'track') { old.tagged = false; this._enqueue(() => this._loadTags(old)); } else if (old.kind === 'nfo') this._enqueue(() => this._loadNfo(old)); else if (old.kind === 'render') { old.src = s; this._enqueue(() => this._loadRender(old)); }
   }
   // Drop everything under `root` that a fresh scan no longer finds (deleted/moved files). Returns how many entries went away.
   removeMissing(root, present, libId = 'music') {

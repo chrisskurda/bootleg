@@ -10,4 +10,5 @@ L.setActive(studio.id); t('the mode of an item comes from the active library whe
 L.setActive('all'); t('"all libraries" is a valid view; adds go to the first library', L.active === 'all' && L.target().id === 'music');
 t('cannot delete the last library; deleting one moves active', L.remove(studio.id) && !L.remove('music') && L.active === 'all' || L.active === 'music');
 t('studio mode offers to-dos, versions and a status; listening does not', MODES.studio.status && !MODES.listening.status && MODES.studio.noteKinds.some(k => k[0] === 'todo') && !MODES.listening.noteKinds.some(k => k[0] === 'todo'));
+const sv = L.add('Server'); L.addConnection(sv.id, { id: 'c1', plugin: 'subsonic', title: 'a@b', config: { url: 'x' } }); t('a library can hold source-plugin connections; their root key maps back to the library', L.ofRoot('subsonic:c1').id === sv.id && L.allConnections().length === 1 && L.connection('c1').title === 'a@b' && new Libraries(s).connection('c1')); L.removeConnection(sv.id, 'c1'); t('…and they can be removed', !L.connection('c1'));
 console.log(bad ? `\n${bad} FAILED` : '\nall libraries tests pass'); process.exit(bad ? 1 : 0);
