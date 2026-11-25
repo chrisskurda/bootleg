@@ -6,7 +6,7 @@ export class Player extends EventTarget {
   constructor(feed) {
     super(); this.feed = feed; feed._init();
     this.audio = new Audio(); this.audio.crossOrigin = 'anonymous'; this.audio.preload = 'auto'; this.deck = new StemDeck(feed);
-    this.mode = 'element'; this.queue = []; this.index = -1; this.order = []; this.shuffle = false; this.repeat = 'off'; this.loading = null;
+    this.mode = 'element'; this.stemsState = 'none'; this.stemPolicy = 'visualizer'; this.hooks = {}; this.queue = []; this.index = -1; this.order = []; this.shuffle = false; this.repeat = 'off'; this.loading = null;
     this.volume = Number(localStorage.getItem('bootleg.volume') ?? 0.9); this.setVolume(this.volume);
     feed.fromElement(this.audio);
     for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange']) this.audio.addEventListener(ev, () => this._emit());
@@ -32,14 +32,34 @@ export class Player extends EventTarget {
 
   // ---- transport
   async _playCurrent() { const item = this.item; if (!item) return; await this._load(item); if (this.item === item) this.play(); }
+  // A stem set plays from its mix straight away (one file, instant start). Its stems are decoded only when wanted — the stem
+  // mixer, a stem-aware visualizer, or the "always" setting — and then take over seamlessly at the current position.
   async _load(item) {
-    this.deck.pause(); this.audio.pause();
-    if (item.kind === 'render') {
-      this.mode = 'deck'; this.audio.removeAttribute('src'); this.audio.load(); this.feed.fromNode(this.deck.master); this.loading = { n: 0, total: item.stems.length }; this._emit();
-      const ok = await this.deck.load(item, (n, total) => { this.loading = { n, total }; this._emit(); }); this.loading = null;
-      if (!ok) return;
-    } else { this.mode = 'element'; this.deck.dispose(); this.feed.fromElement(this.audio); await this._setSrc(item); }
+    this.deck.pause(); this.audio.pause(); this.loading = null; this._stemsFor = null;
+    if (item.kind === 'render' && !item.mix) {                                  // no mix file: the stems are all there is
+      this.mode = 'deck'; this.stemsState = 'loading'; this.audio.removeAttribute('src'); this.audio.load(); this.feed.fromNode(this.deck.master); this.loading = { n: 0, total: item.stems.length }; this._emit();
+      await this.hooks.loadClips?.(item); const ok = await this.deck.load(item, (n, total) => { this.loading = { n, total }; this._emit(); }); this.loading = null; if (!ok) return; this.stemsState = 'ready';
+    } else {
+      this.mode = 'element'; this.deck.dispose(); this.feed.fromElement(this.audio); this.stemsState = item.kind === 'render' ? 'unloaded' : 'none'; await this._setSrc(item.kind === 'render' ? item.mix : item.src);
+    }
     this._applyOut(); this._media(item); this._emit();
+    if (item.kind === 'render' && this.stemPolicy === 'auto') this.ensureStems();
+  }
+  async ensureStems() {
+    const item = this.item; if (!item || item.kind !== 'render' || this.stemsState !== 'unloaded' || this.mode !== 'element') return;
+    this.stemsState = 'loading'; this._stemsFor = item; this.loading = { n: 0, total: item.stems.length }; this._emit();
+    try {
+      await this.hooks.loadClips?.(item); const ok = await this.deck.load(item, (n, total) => { this.loading = { n, total }; this._emit(); });
+      if (!ok || this.item !== item || this._stemsFor !== item) { this.loading = null; return; }
+      const pos = this.audio.currentTime || 0, was = !this.audio.paused;
+      this.deck.offset = pos; this.feed.fromNode(this.deck.master); this.mode = 'deck'; this.audio.pause(); this._applyOut(); this.stemsState = 'ready'; this.loading = null; if (was) this.deck.play(pos);
+    } catch (e) { this.loading = null; this.stemsState = 'unloaded'; this.stemsError = String(e && e.message || e); }
+    this._emit();
+  }
+  // Give the memory back: go back to playing the mix from where the stems were.
+  unloadStems() {
+    if (this.mode !== 'deck' || !this.item?.mix) return; const pos = this.deck.pos(), was = this.deck.playing;
+    this.deck.dispose(); this.mode = 'element'; this.feed.fromElement(this.audio); this.audio.currentTime = pos; this.stemsState = 'unloaded'; this._applyOut(); if (was) this.audio.play().catch(() => {}); this._emit();
   }
   // While casting, local playback keeps running (the visualizer and timeline need it) but is silent: the output node is
   // disconnected from the speakers, the analysers stay connected.
@@ -50,10 +70,10 @@ export class Player extends EventTarget {
   }
   // Some webviews (WebKitGTK/GStreamer) cannot stream media from the custom asset:// scheme. If the element rejects the URL,
   // fetch the file once (the asset protocol does allow that) and play it from a blob: URL instead.
-  async _setSrc(item) {
-    const a = this.audio; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
-    a.src = item.src.url(); if (item.src.kind !== 'tauri' && item.src.kind !== 'remote') return;
-    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { const r = await (item.src.fetch ? item.src.fetch() : fetch(item.src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (this.item === item) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
+  async _setSrc(src) {
+    const cur = this.item, item = { src }, a = this.audio; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
+    a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
+    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { const r = await (item.src.fetch ? item.src.fetch() : fetch(item.src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(await r.blob()); if (this.item === cur) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
   }
   play() { this.feed.ctx.resume(); if (this.mode === 'deck') this.deck.play(); else this.audio.play().catch(() => {}); this._emit(); }
   pause() { if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }

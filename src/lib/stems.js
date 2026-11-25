@@ -1,5 +1,8 @@
 // Plays a stem render: every stem decoded, started together on one clock through its own fader (the audition page's engine).
 // Each stem is also tapped before its fader and handed to the visualizer (feed.addStem), so per-stem visuals follow the music even when a stem is muted.
+// run fn over items with at most `limit` in flight (decoded stems are large; this bounds the peak memory)
+async function pool(items, limit, fn) { const out = new Array(items.length); let i = 0; await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } })); return out; }
+
 export class StemDeck {
   constructor(feed) {
     this.feed = feed; feed._init(); this.ctx = feed.ctx; this.master = this.ctx.createGain(); this.master.connect(this.ctx.destination);
@@ -7,7 +10,7 @@ export class StemDeck {
   }
   async load(render, onProgress) {
     const id = ++this._id; this.dispose(); const gains = (render.manifest && render.manifest.stems_gain_db) || {}; let n = 0;
-    const decoded = await Promise.all(render.stems.map(async s => { const ab = await (await fetch(s.src.url())).arrayBuffer(); const buf = await this.ctx.decodeAudioData(ab); onProgress?.(++n, render.stems.length); return { name: s.name, buf }; }));
+    const decoded = await pool(render.stems, 3, async s => { if (id !== this._id) return null; const ab = await (await fetch(s.src.url())).arrayBuffer(); const buf = await this.ctx.decodeAudioData(ab); onProgress?.(++n, render.stems.length); return { name: s.name, buf }; });
     if (id !== this._id) return false;                                         // the user picked something else while this loaded
     this.stems = decoded.map(({ name, buf }) => {
       const baseDb = gains[name] ?? 0, tap = this.ctx.createGain(), fader = this.ctx.createGain(), role = window.VisStems.roleOf(name);
@@ -25,6 +28,7 @@ export class StemDeck {
       this.feed.stemState[s.name] = { muted: s.mute, solo: s.solo, gainDb: db };
     }
   }
+  get memoryMB() { return Math.round(this.stems.reduce((n, s) => n + s.buf.length * s.buf.numberOfChannels * 4, 0) / 1048576); }
   pos() { return this.playing ? Math.min(this.dur, this.offset + Math.max(0, this.ctx.currentTime - this.t0)) : this.offset; }
   play(from) {
     this.ctx.resume(); this._stopSources(); this.offset = from ?? this.offset; if (this.offset >= this.dur - 0.05) this.offset = 0;

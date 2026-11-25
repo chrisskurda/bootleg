@@ -174,3 +174,4 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .alist-wrap .arow, .slist .srow2 { box-sizing: border-box; }
 .card { content-visibility: auto; contain-intrinsic-size: 190px 240px; }
 .vc { flex: none; width: 100%; } .alist-wrap .arow.head { position: sticky; top: 0; z-index: 3; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 0; height: 32px; } .arow.sel { background: #1d2342; }
+.stemchip { color: #7fd6ff; margin-left: 8px; font-size: 10.5px; } .stemload { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 4px 2px; }

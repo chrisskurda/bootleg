@@ -22,16 +22,16 @@ export class VizHost {
   setPack(id) {
     this.pack = this.packs.find(p => p.id === id); if (!this.pack) return; this.packSelect.value = id; this.params = defaultsOf(this.pack); try { localStorage.setItem('bootleg.pack', id); } catch { /* ignore */ }
     // the pack page is loaded only when first shown
-    this._want = PACKS + id + '/' + (this.pack.page || 'index.html'); if (this.running || this.screenAlive) this._applySrc(); this._sendPack(); const defs = Object.entries(this.pack.params || {});
+    this._want = PACKS + id + '/' + (this.pack.page || 'index.html'); if (this.running || this.screenAlive) this._applySrc(); this._sendPack(); this.onPack?.(); const defs = Object.entries(this.pack.params || {});
     this.paramsEl.replaceChildren(...(defs.length ? defs.map(([k, d]) => control(this.params, k, d)) : [h('div', { class: 'none' }, 'This pack has no settings.')]));
   }
   resetLook() { Object.assign(this.look, window.LOOK_DEFAULTS); this.lookEl.replaceChildren(...LOOKS.map(([k, mn, mx, st, lb]) => control(this.look, k, { type: 'number', min: mn, max: mx, step: st, label: lb }))); }
   _applySrc() { if (this._want && this.frame.getAttribute('src') !== this._want) this.frame.src = this._want; }
   start() { this._applySrc(); if (this.running) return; this.running = true; if (!this._ticking) { this._ticking = true; this._last = performance.now(); requestAnimationFrame(t => this._tick(t)); } }
-  stop() { this.running = false; if (this.screenAlive) this._kick(); }       // a screen is still watching: keep analysing even when this view is hidden
+  stop() { this.running = false; if (this.screenAlive || this.tap) this._kick(); }       // a screen is still watching: keep analysing even when this view is hidden
   fullscreen() { (this.stage.requestFullscreen || this.stage.webkitRequestFullscreen).call(this.stage); }
   _tick(now) {
-    if (!this.running && !this.screenAlive) { this._ticking = false; return; } const dt = Math.max(0, Math.min(0.1, (now - this._last) / 1000)); this._last = now;
+    if (!this.running && !this.screenAlive && !this.tap) { this._ticking = false; return; } const dt = Math.max(0, Math.min(0.1, (now - this._last) / 1000)); this._last = now;
     const p = this.player, item = p.item, A = this.feed.update(dt), w = this.frame.contentWindow;
     if (!A.spectrum) { A.spectrum = this.zero.s; A.wave = this.zero.w; A.past = () => this.zero.s; }
     A.live = !!item; A.t = item ? p.pos() : now / 1000; A.duration = item ? p.dur() : 0;
@@ -41,6 +41,7 @@ export class VizHost {
     try { w.__META = meta; w.__AUDIO = A; w.__PARAMS = this.params; w.__FX = window.lookFx(this.look); } catch { /* the frame is still loading */ }
     const css = window.lookToCss(this.look, A, now / 1000); if (css !== this._css) { this.frame.style.filter = css; this._css = css; }
     if (this.screenAlive) this.bc.postMessage({ type: 'frame', A: packFrame(A), meta, params: this.params, look: this.look });
+    this.tap?.(A);
     this.lastA = A; requestAnimationFrame(t => this._tick(t));
   }
 }

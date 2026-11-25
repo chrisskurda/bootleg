@@ -11,6 +11,7 @@ import { albumKey } from '/lib/album-details.js';
 import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
 import { getSource, listSources } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
+import { Bridge } from '/lib/bridge.js';
 import { Outputs } from '/lib/outputs/manager.js';
 import { getOutput } from '/lib/outputs/index.js';
 import { readTags } from '/lib/tags.js';
@@ -23,6 +24,8 @@ const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60
 const TAURI = window.__TAURI__;
 const lib = new Library(), feed = new AudioFeed(), player = new Player(feed);
 const viz = new VizHost({ stage: $('#vizStage'), packSelect: $('#packSelect'), paramsEl: $('#packParams'), lookEl: $('#lookParams'), feed, player });
+const bridge = new Bridge({ player, viz }), bridgeOn = () => { try { return localStorage.getItem('bootleg.bridge') === '1'; } catch { return false; } };
+if (!window.__BOOTLEG_SELFTEST && bridgeOn()) bridge.start();
 function toast(msg, bad = false) { const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg); document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 3000); }
 const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test mode: the shell injects this flag, and nothing below touches the real settings, library or notes
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
@@ -31,7 +34,7 @@ const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d),
 let view = 'tracks';
 function show(v) {
   view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v));
-  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') buildStems(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } renderAll();
+  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') { buildStems(); ensureForViz(); } if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } renderAll();
 }
 $$('.nav').forEach(b => b.onclick = () => show(b.dataset.view)); $('#np').onclick = () => show('now');
 
@@ -41,13 +44,13 @@ const cover = (url, cls = 'cover') => url ? h('img', { class: cls, src: url, alt
 function trackRow(t, i) {
   return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => player.playList(shown, i) },
     h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => player.playList(shown, i) }, '▶')),
-    h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
+    h('span', { class: 'tt' }, t.title, t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
     h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
 const trackVL = new VirtualList({ scroller: $('#view-tracks'), container: $('#trackList'), rowH: 38, render: (t, i) => trackRow(t, i) });
 function renderTracks() {
   const next = lib.search(lib.sortedTracks(), $('#search').value); if (next !== shown) { shown = next; trackVL.setItems(shown); } else trackVL.schedule();
-  $('#emptyTracks').hidden = lib.visibleTracks.length > 0; $('.thead').hidden = !lib.visibleTracks.length;
+  $('#emptyTracks').hidden = lib.visibleItems.length > 0; $('.thead').hidden = !lib.visibleItems.length;
 }
 // ---- albums: grid / list / cover flow
 let flowIdx = 0, openKey = null, listShown = null, gridLimit = 300;
@@ -121,14 +124,14 @@ function renderRenders() {
   const list = lib.search(lib.visibleRenders, $('#search').value);
   $('#renderList').replaceChildren(...list.map(r => h('div', { class: 'rcard', onclick: () => player.playList([r], 0) }, cover(r.coverUrl), h('div', {}, h('div', { class: 'big' }, r.title),
     h('div', { class: 'muted small' }, [r.artist, r.bpm && Math.round(r.bpm) + ' BPM', r.key, r.duration && fmt(r.duration)].filter(Boolean).join(' · ')),
-    h('div', { class: 'badges' }, h('span', { class: 'badge ok' }, `${r.stems.length} stems`), r.sections.length ? h('span', { class: 'badge' }, `${r.sections.length} sections`) : null, r.clips ? h('span', { class: 'badge' }, 'sample labels') : null)))));
+    h('div', { class: 'badges' }, h('span', { class: 'badge ok' }, `${r.stems.length} stems`), r.sections.length ? h('span', { class: 'badge' }, `${r.sections.length} sections`) : null, r.clipsSrc ? h('span', { class: 'badge' }, 'sample labels') : null)))));
   $('#emptyRenders').hidden = list.length > 0;
 }
 let albumCount = 0;
 function renderAll() {
-  const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length; $('#nTracks').textContent = vt || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
+  const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length, vi = lib.visibleItems.length; $('#nTracks').textContent = vi || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
   if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders();
-  const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${vt} tracks · ${vr} renders` : '';
+  const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${vt} tracks · ${vr} stem sets` : '';
   $('#forget').hidden = !scopeRoots().length;
 }
 // while tags stream in, redraw less often (each redraw of a big library is work a weaker machine can't spare)
@@ -136,12 +139,12 @@ let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTime
 $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 
 // ------------------------------------------------------------------ adding music
-const libs = new Libraries(store); lib.scope = libs.active;
+const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
-function applySettings() { lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
+function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
 let rescanTimer = 0; function armRescan() { clearInterval(rescanTimer); rescanTimer = 0; if (TAURI && settings.rescanMinutes > 0) rescanTimer = setInterval(() => syncAll(true), settings.rescanMinutes * 60000); }
 const scan = { on: false, text: '' };
 function paintProgress() {
@@ -232,7 +235,7 @@ function updateBar() {
   const c = $('#npCover'); if (it && it.coverUrl) { c.src = it.coverUrl; c.hidden = false; } else c.hidden = true;
   $('#shuffle').classList.toggle('on', player.shuffle); const rp = $('#repeat'); rp.classList.toggle('on', player.repeat !== 'off'); rp.textContent = player.repeat === 'one' ? '⟲1' : '⟲'; rp.title = 'Repeat: ' + player.repeat;
   $('#qCount').textContent = player.queue.length || ''; $$('.row').forEach(r => r.classList.toggle('playing', it && r.dataset.id === it.id)); $('#vizMsg').textContent = it ? '' : 'Play something to see it react. Until then the pack plays its idle demo.';
-  renderQueue(); if (view === 'now') buildStems();
+  renderQueue(); if (view === 'now') { buildStems(); ensureForViz(); }
 }
 player.addEventListener('change', updateBar);
 let drag = false; seek.oninput = () => { drag = true; }; seek.onchange = () => { const d = player.dur(); if (d) player.seek(seek.value / 1000 * d); drag = false; };
@@ -252,9 +255,14 @@ $('#qToggle').onclick = () => { const q = $('#queue'); q.hidden = !q.hidden; $('
 // ------------------------------------------------------------------ stems mixer
 let stemEls = [];
 function buildStems() {
-  const it = player.item, deck = player.deck, panel = $('#stemsPanel'), on = it && it.kind === 'render' && player.mode === 'deck' && deck.stems.length > 0; panel.hidden = !on; if (!on) { stemEls = []; return; }
+  const it = player.item, deck = player.deck, panel = $('#stemsPanel'), st = player.stemsState, isRender = !!it && it.kind === 'render'; panel.hidden = !isRender; if (!isRender) { stemEls = []; return; }
+  if (st !== 'ready' || !deck.stems.length) {       // playing the mix: stems are loaded on demand (they take memory)
+    stemEls = []; $('#stemsHint').textContent = '';
+    $('#stemRows').replaceChildren(h('div', { class: 'stemload' }, h('span', { class: 'muted' }, st === 'loading' ? `Loading stems… ${player.loading?.n || 0} of ${player.loading?.total || it.stems.length}` : `Playing the mix. Load the ${it.stems.length} stems to mute, solo and give stem-aware visualizers real per-stem data (uses memory while loaded).`), st === 'unloaded' ? h('button', { class: 'btn primary', id: 'loadStems', onclick: () => player.ensureStems() }, 'Load stems') : ''));
+    return;
+  }
   if (stemEls.length === deck.stems.length && stemEls[0].deckStem === deck.stems[0]) return;       // already built for this render
-  $('#stemsHint').textContent = 'M mute · S solo · the visualizer follows each stem'; stemEls = [];
+  $('#stemsHint').replaceChildren('M mute · S solo · the visualizer follows each stem · ', h('button', { class: 'link', id: 'unloadStems', title: 'Go back to playing the mix and free the memory', onclick: () => player.unloadStems() }, `unload (${deck.memoryMB} MB)`)); stemEls = [];
   $('#stemRows').replaceChildren(...deck.stems.map(s => {
     const meter = h('i'), lbl = h('div', { class: 'lbl' }), m = h('button', { class: 'btn ms m', title: 'Mute', onclick: () => { s.mute = !s.mute; deck.applyGains(); sync(); } }, 'M'), so = h('button', { class: 'btn ms s', title: 'Solo', onclick: () => { s.solo = !s.solo; deck.applyGains(); sync(); } }, 'S');
     const trim = h('input', { type: 'range', min: -24, max: 6, step: 0.5, value: 0, title: 'trim (dB)', oninput: () => { s.trimDb = +trim.value; deck.applyGains(); } });
@@ -263,6 +271,9 @@ function buildStems() {
     row.deckStem = s; row._r = { meter, lbl }; stemEls.push(row); return row;
   }));
 }
+// A stem-aware visualizer (pack.json usesStems) is on screen: it deserves the real stems.
+function ensureForViz() { const it = player.item; if (it && it.kind === 'render' && settings.stemsLoad === 'visualizer' && view === 'now' && viz.pack?.usesStems) player.ensureStems(); }
+viz.onPack = ensureForViz;
 function paintMeters() {
   if (view !== 'now' || !stemEls.length || !viz.lastA || !viz.lastA.stems) return; const by = Object.fromEntries(viz.lastA.stems.map(s => [s.name, s]));
   for (const row of stemEls) { const st = by[row.deckStem.name]; if (!st) continue; row._r.meter.style.width = Math.round(st.level * 100) + '%'; row._r.lbl.textContent = st.label ? `${st.label}${st.kit ? ' — ' + st.kit : ''}` : ''; }
@@ -320,9 +331,15 @@ async function paintSettings() {
     row('Check for changes on startup', TAURI ? 'Looks for added, changed and removed files in the background.' : 'Desktop app only — a browser cannot see the disk without being given files.', chk('scanOnStart')),
     row('Re-check every N minutes', '0 = only on startup or when you ask.', num('rescanMinutes', 0, 1440)),
     row('Tag-reading parallelism', 'Higher is faster on fast disks; lower is gentler on network drives.', num('tagConcurrency', 1, 32)),
+    h('h3', {}, 'Stem sets'),
+    row('Show stem sets in the track list', 'A folder of stems (with its mix) appears as one item; its parts and mix never show as separate tracks.', chk('includeRenders')),
+    h('label', { class: 'srow' }, h('span', {}, h('b', {}, 'Load stems'), h('small', {}, 'A stem set always starts playing from its mix. Decoded stems use a lot of memory, so choose when they load.')),
+      h('select', { onchange: e => { settings.stemsLoad = e.target.value; applySettings(); } }, ...[['visualizer', 'When a stem-aware visualizer is shown (default)'], ['manual', 'Only when I press “Load stems”'], ['auto', 'Always (uses the most memory)']].map(([v, l]) => h('option', { value: v, selected: settings.stemsLoad === v }, l)))),
     h('h3', {}, '.nfo files'),
     row('Read .nfo files', 'album.nfo / artist.nfo (Kodi style) and plain-text .nfo in your folders: shown with the track and searchable.', chk('useNfo')),
     row('Fill missing tags from .nfo', 'Tags in the files always win; an .nfo only supplies what is missing (album, artist, year, genre).', chk('nfoFill')),
+    h('h3', {}, 'Car Thing'),
+    row('Connect to bootleg-bridge-thing', 'Lets a Spotify Car Thing running the bootleg-bridge-thing app control playback and show the visualizer. Connects to the bridgething desktop app on this computer (127.0.0.1:8899).', h('input', { type: 'checkbox', checked: bridgeOn(), onchange: e => { try { localStorage.setItem('bootleg.bridge', e.target.checked ? '1' : '0'); } catch { /* private mode */ } e.target.checked ? bridge.start() : bridge.stop(); } })),
     h('h3', {}, 'About'),
     h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'bootleg'), h('small', {}, build ? `version ${build.version} · build ${build.commit || 'local'} · ${build.date}` : 'local build')), h('span', { class: 'muted small' }, 'MIT licensed')),
     h('h3', {}, 'Maintenance'),
@@ -389,9 +406,9 @@ async function selfTest(dir) {
     const ts = performance.now(), first = await scanFolderTauri(dir); out.scanMs = Math.round(performance.now() - ts); out.scanFiles = first.length;
     const tt = performance.now(); await addSources(first, 'self-test'); await wait(() => (lib.tracks.length || lib.renders.length) && lib.tracks.every(t => t.tagged), 180000); out.tagMs = Math.round(performance.now() - tt);
     { const src = lib.tracks[0]?.src; if (src && lib.nativeReader) { const n = await lib.nativeReader(src.path), j = await readTags(src.reader()); out.nativeTagsMatch = !!n && ['title', 'artist', 'album', 'year', 'track'].every(k => (n[k] ?? '') == (j[k] ?? '')) && !!(n.cover || n.coverKey) === !!j.cover; if (!out.nativeTagsMatch) out.nativeVsJs = JSON.stringify([{ ...n, cover: !!n?.cover }, { ...j, cover: !!j.cover }]).slice(0, 300); } }
-    out.tracks = lib.tracks.length; out.renders = lib.renders.length; out.firstTitle = lib.sortedTracks()[0]?.title; out.cover = lib.tracks.some(t => !!t.coverUrl);
-    if (lib.tracks.length) { await player.playList(lib.sortedTracks(), 0); await wait(() => player.playing && player.pos() > 0.7); let peak = 0; for (let i = 0; i < 20; i++) { const A = feed.update(0.05); peak = Math.max(peak, ...A.spectrum); await new Promise(r => setTimeout(r, 50)); } out.pos = player.pos(); out.peak = peak; out.mode = player.mode; }
-    if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing && player.pos() > 0.7); out.stems = player.deck.stems.length; }
+    out.tracks = lib.tracks.length; out.renders = lib.renders.length; out.firstTitle = lib.tracks[0]?.title; out.cover = lib.tracks.some(t => !!t.coverUrl);
+    if (lib.tracks.length) { await player.playList(lib.tracks.slice(), 0); await wait(() => player.playing && player.pos() > 0.7); let peak = 0; for (let i = 0; i < 20; i++) { const A = feed.update(0.05); peak = Math.max(peak, ...A.spectrum); await new Promise(r => setTimeout(r, 50)); } out.pos = player.pos(); out.peak = peak; out.mode = player.mode; }
+    if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.playing && player.pos() > 0.5); out.mixFirst = lib.renders[0].mix ? player.mode === 'element' : true; await player.ensureStems(); if (lib.renders[0].mix) await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing); out.stems = player.deck.stems.length; out.stemsContinued = player.pos() > 0.5; }
     { await lib.flush(); const read = lib.stats.read, srcs = await scanFolder(dir); lib.clear(); lib.add(srcs); await wait(() => lib.tracks.every(t => t.tagged)); out.cachedRescan = lib.stats.read === read && lib.stats.cached >= out.tracks; out.cacheFiles = (await cache.stats()).files; await cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); libs.addRoot(libs.target().id, dir); lib.clear(); const r0 = lib.stats.read, tr = performance.now(); await restoreFromCache(); await wait(() => lib.tracks.every(t => t.tagged)); out.restoreMs = Math.round(performance.now() - tr); out.restored = lib.tracks.length === out.tracks && lib.renders.length === out.renders && lib.stats.read === r0; libs.removeRoot(libs.target().id, dir); await cache.delIndex(dir); }
     const sub = await TAURI.core.invoke('selftest_subsonic');
     if (sub) {      // a source plugin end to end: connect, scan, stream (WebKit can't read it cross-origin, so this exercises the HTTP plugin + blob fallback)
@@ -401,7 +418,7 @@ async function selfTest(dir) {
     const dlRaw = await TAURI.core.invoke('selftest_dlna'), [dl, dlFlags = ''] = (dlRaw || '').split(';');
     if (dl) {       // casting end to end against a mock DLNA renderer: control (SOAP), the LAN media server, transport mirroring
       const dev = await getOutput('dlna').add(dl); out.dlnaName = dev.name; out.dlnaSsdp = (await getOutput('dlna').discover({ timeoutMs: 2500 }).catch(() => [])).some(d => d.id === dev.id);
-      const local = lib.sortedTracks().find(t => t.src.kind === 'tauri'); await player.playList([local], 0); await wait(() => player.playing && player.pos() > 0.5);
+      const local = lib.tracks.find(t => t.src.kind === 'tauri'); await player.playList([local], 0); await wait(() => player.playing && player.pos() > 0.5);
       await outputs.select(dev); if (outputs.error) throw new Error('cast: ' + outputs.error); await new Promise(r => setTimeout(r, 1800));
       player.pause(); await new Promise(r => setTimeout(r, 400)); player.seek(3); await new Promise(r => setTimeout(r, 400)); if (!dlFlags.includes('novol')) player.setVolume(0.5); await new Promise(r => setTimeout(r, 400));
       out.dlnaStatus = (await getOutput('dlna').status(dev)).state; await outputs.select(null); out.dlnaLocalRestored = player.localOut !== false;
