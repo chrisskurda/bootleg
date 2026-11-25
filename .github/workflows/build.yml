@@ -39,7 +39,7 @@ jobs:
       matrix:
         include:
           - { name: macOS arm64, os: macos-latest, bundles: app, out: 'src-tauri/target/release/bundle/macos/*.app', bin: 'src-tauri/target/release/bundle/macos/bootleg.app/Contents/MacOS/bootleg' }
-          - { name: Linux x64, os: ubuntu-22.04, bundles: 'deb,appimage', out: 'src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage', bin: 'src-tauri/target/release/bootleg' }
+          - { name: Linux x64, os: ubuntu-22.04, bundles: 'deb,appimage', out: "src-tauri/target/release/bundle/deb/*.deb\nsrc-tauri/target/release/bundle/appimage/*.AppImage", bin: 'src-tauri/target/release/bootleg' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +61,9 @@ jobs:
       - name: Build the app
         run: npx tauri build --bundles ${{ matrix.bundles }}
       - name: Self-test the built app (scan, tags, playback, stems, cache, notes, Subsonic)
+        env:
+          # macOS runners have no user to click Play: WebKit blocks autoplay there, so the playback checks are skipped (still covered on Linux and locally)
+          SELFTEST_ALLOW_NO_AUTOPLAY: ${{ runner.os == 'macOS' && '1' || '' }}
         run: scripts/selftest.sh ${{ matrix.bin }}
       - name: Name the artifacts after the commit
         id: ver

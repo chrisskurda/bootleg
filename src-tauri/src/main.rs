@@ -91,9 +91,10 @@ fn screens_list(app: AppHandle) -> Result<Vec<Mon>, String> {
 #[tauri::command]
 async fn screen_open(app: AppHandle, index: usize) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("screen") { let _ = w.close(); }
-    let mons = app.available_monitors().map_err(|e| e.to_string())?; let m = mons.get(index).ok_or("no such display")?;
-    let f = m.scale_factor();
-    let w = WebviewWindowBuilder::new(&app, "screen", WebviewUrl::App("screen.html".into())).title("bootleg visualizer").position(m.position().x as f64 / f + 40.0, m.position().y as f64 / f + 40.0).inner_size(960.0, 540.0).build().map_err(|e| e.to_string())?;
+    let mons = app.available_monitors().map_err(|e| e.to_string())?;
+    let mut b = WebviewWindowBuilder::new(&app, "screen", WebviewUrl::App("screen.html".into())).title("bootleg visualizer").inner_size(960.0, 540.0);
+    if let Some(m) = mons.get(index) { let f = m.scale_factor(); b = b.position(m.position().x as f64 / f + 40.0, m.position().y as f64 / f + 40.0); }      // no display list (headless/odd session): open where the OS puts it
+    let w = b.build().map_err(|e| e.to_string())?;
     w.set_fullscreen(true).map_err(|e| e.to_string())
 }
 #[tauri::command]
