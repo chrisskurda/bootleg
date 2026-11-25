@@ -38,8 +38,15 @@ export class Player extends EventTarget {
       this.mode = 'deck'; this.audio.removeAttribute('src'); this.audio.load(); this.feed.fromNode(this.deck.master); this.loading = { n: 0, total: item.stems.length }; this._emit();
       const ok = await this.deck.load(item, (n, total) => { this.loading = { n, total }; this._emit(); }); this.loading = null;
       if (!ok) return;
-    } else { this.mode = 'element'; this.deck.dispose(); this.feed.fromElement(this.audio); this.audio.src = item.src.url(); }
+    } else { this.mode = 'element'; this.deck.dispose(); this.feed.fromElement(this.audio); await this._setSrc(item); }
     this._media(item); this._emit();
+  }
+  // Some webviews (WebKitGTK/GStreamer) cannot stream media from the custom asset:// scheme. If the element rejects the URL,
+  // fetch the file once (the asset protocol does allow that) and play it from a blob: URL instead.
+  async _setSrc(item) {
+    const a = this.audio; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
+    a.src = item.src.url(); if (item.src.kind !== 'tauri') return;
+    await new Promise(ok => { const done = () => { a.removeEventListener('error', fail); a.removeEventListener('loadedmetadata', done); ok(); }, fail = async () => { a.removeEventListener('loadedmetadata', done); a.removeEventListener('error', fail); try { this._blob = URL.createObjectURL(await (await fetch(item.src.url())).blob()); if (this.item === item) a.src = this._blob; } catch { /* leave the error visible */ } ok(); }; a.addEventListener('error', fail, { once: true }); a.addEventListener('loadedmetadata', done, { once: true }); });
   }
   play() { this.feed.ctx.resume(); if (this.mode === 'deck') this.deck.play(); else this.audio.play().catch(() => {}); this._emit(); }
   pause() { if (this.mode === 'deck') this.deck.pause(); else this.audio.pause(); this._emit(); }

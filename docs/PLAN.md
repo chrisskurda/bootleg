@@ -47,3 +47,8 @@ Next slices: notes UI (rating widget, note composer at the playhead, markers on 
 ## Status (v0.1)
 Done: library + tags (mp3/flac/m4a), stem renders with live mixer, visualizer host, notes/ratings/provenance/playlists with JSON + M3U import/export, Tauri desktop shell (asset-protocol streaming scoped to what the user picks; headless self-test via `BOOTLEG_SELFTEST`). UI stack: plain ES modules, no bundler.
 Later: Subsonic source, source/stem-format plugin interface, spectrum over postMessage for sandboxed packs, signing. After the player is solid: **bootleg-bridge-thing** (separate repo) — plugin that exposes player controls and shows the visualizer elsewhere.
+
+## Desktop platforms
+- **macOS (arm64):** `npx tauri build` → `src-tauri/target/release/bundle/macos/bootleg.app`; verified with the headless self-test.
+- **Linux (arm64 container, WebKitGTK):** `scripts/linux/test.sh` builds in Docker and runs the self-test under Xvfb — passes. WebKitGTK can't stream from `asset://`, so the player falls back to a blob URL when the media element rejects it. Not yet tried: x86_64 Linux, packaging (.deb/AppImage), real audio output.
+- **Android:** later (Tauri 2 mobile); needs a different file-access model (SAF) — the source plugin interface should keep that in mind.

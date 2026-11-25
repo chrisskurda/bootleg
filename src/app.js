@@ -164,7 +164,7 @@ async function selfTest(dir) {
     if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing && player.pos() > 0.7); out.stems = player.deck.stems.length; }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
-  } catch (e) { out.error = String(e && e.message || e); }
+  } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
   await TAURI.core.invoke('selftest_done', { result: JSON.stringify(out) });
 }
 
