@@ -27,7 +27,7 @@
     <nav class="side" aria-label="Library">
       <button class="nav on" data-view="tracks">Tracks <span id="nTracks" class="count"></span></button>
       <button class="nav" data-view="albums">Albums <span id="nAlbums" class="count"></span></button>
-      <button class="nav" data-view="renders">Stem renders <span id="nRenders" class="count"></span></button>
+      <button class="nav" data-view="renders">Stem sets <span id="nRenders" class="count"></span></button>
       <button class="nav" data-view="notes">Notes</button>
       <button class="nav" data-view="playlists">Playlists</button>
       <button class="nav" data-view="now">Now playing</button>
@@ -39,12 +39,12 @@
       <section id="view-tracks" class="view">
         <div class="thead"><span></span><span>Title</span><span>Artist</span><span>Album</span><span class="r">Time</span></div>
         <div id="trackList" class="rows"></div>
-        <div id="emptyTracks" class="empty"><b>Add some music.</b><br>Choose a folder (or drop one here). Tags and cover art are read from the files.<br>A stem render folder (with <code>manifest.json</code> and <code>stems/</code>) shows up under <i>Stem renders</i>.</div>
+        <div id="emptyTracks" class="empty"><b>Add some music.</b><br>Choose a folder (or drop one here). Tags and cover art are read from the files.<br>A folder of stems (a <code>stems/</code> folder, with its mix) is one item in the list and also under <i>Stem sets</i>.</div>
       </section>
       <section id="view-albums" class="view" hidden>
         <div class="toolbar"><div class="seg" id="albumMode" role="group" aria-label="Album view"><button data-mode="grid" title="Grid">▦ Grid</button><button data-mode="list" title="List">☰ List</button><button data-mode="flow" title="Cover flow">◫ Flow</button><button data-mode="split" title="List with details and notes">▥ Split</button></div></div>
         <div id="albumGrid" class="grid"></div><div id="albumList" class="alist-wrap" hidden><div class="arow head"><span></span><span>Album</span><span>Artist</span><span class="r">Year</span><span class="r">Tracks</span><span class="r">Length</span></div><div id="albumListVc" class="vc"></div></div><div id="albumFlow" class="flowwrap" hidden></div><div id="albumSplit" class="split" hidden><div id="splitList" class="slist"><div id="splitVc" class="vc"></div></div><div id="splitPane" class="spane"></div></div><div id="albumDetail" class="adetail" hidden></div><div id="emptyAlbums" class="empty">No albums yet — albums come from your files' tags.</div></section>
-      <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem renders yet. Add a MusicGen render folder to mute, solo and watch each stem.</div></section>
+      <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem sets yet. Add a folder with a <code>stems/</code> folder (the bootleg stem format) to mute, solo and watch each stem.</div></section>
 
       <section id="view-notes" class="view" hidden>
         <div class="toolbar"><input id="noteSearch" type="search" placeholder="Search notes, tags, provenance…"><select id="noteTag" aria-label="Tag"><option value="">any tag</option></select><select id="noteStatus" aria-label="Status"><option value="">any status</option><option>idea</option><option>draft</option><option>mixing</option><option>mastered</option><option>released</option></select><label class="muted">Rating ≥ <select id="noteMin"><option value="0">any</option><option value="3">3</option><option value="4">4</option><option value="4.5">4.5</option><option value="5">5</option></select></label></div>

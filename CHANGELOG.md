@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- The stem-folder layout is now documented as the **bootleg stem format** (`docs/STEM-FORMAT.md`): version 1, with an optional `"format": "bootleg-stem", "version": 1` in `manifest.json`. The app calls these **stem sets**. Nothing changes for existing folders.
+- The README describes what bootleg is and how to run it.
+
 ### Fixed
 - The notes panel no longer rebuilds while you are typing in one of its fields (a rating, status or tag change elsewhere could wipe what you had just typed).
 

@@ -1,12 +1,12 @@
 # bootleg — plan
 
 ## What it is
-One player, two shells: a web app, and the same app in a Tauri window. It plays ordinary music files and MusicGen stem renders, shows visualizers
+One player, two shells: a web app, and the same app in a Tauri window. It plays ordinary music files and stem sets (the bootleg stem format), shows visualizers
 from [bootleg-vizualizer](https://github.com/chrisskurda/bootleg-vizualizer), and can browse a Subsonic server.
 
 ## Formats
 - **Standard**: mp3, flac, m4a/aac, ogg/opus, wav. Tags (ID3, Vorbis comments, MP4 atoms) and embedded cover art.
-- **Stem render** (folder): `stems/<name>.flac|wav`, `manifest.json` (`bpm`, `key`, `sections`, `stems_gain_db`; the mix is the sum of the stems at those gains), `clips.json` (every loop/hit placed: stem, sample file, kit, bar or second), `provenance.json`, `mix.flac`.
+- **Stem set** (folder; the *bootleg stem format*, see [STEM-FORMAT.md](STEM-FORMAT.md)): `stems/<name>.flac|wav`, `manifest.json` (`bpm`, `key`, `sections`, `stems_gain_db`; the mix is the sum of the stems at those gains), `clips.json` (every loop/hit placed: stem, sample file, kit, bar or second), `provenance.json`, `mix.flac`.
   The stem player mixes the stems itself (WebAudio gain per stem) so mute/solo/trim are real.
 - **Subsonic / OpenSubsonic** (client only): browse artists/albums/playlists, stream, cover art. Needs a server; browsers need CORS or a proxy, which Tauri's HTTP layer avoids.
 
@@ -40,7 +40,7 @@ Target user: someone with a **big library** who catalogs it — live-performance
 
 **Import / export** (large libraries): notes + playlists as one JSON file (`bootleg-notes` v1, merge on import: newer record wins, notes unioned by id); playlists as M3U/M3U8 (read/write, resolved by file name → artist+title → title). Later: CSV for ratings/notes, and reading other apps' exports.
 
-**Sources are plugins.** A source implements `list()/readTags()/streamUrl()/cover()` (and optionally `stems()`): native files (done), stem renders (done), Subsonic/OpenSubsonic (next), streaming-service plugins written by anyone. The notes/playlist database is source-agnostic, so annotations follow a recording across sources. **Stem formats are plugins too**: a loader turns "a folder/file" into `{stems[], clips?, sections?, meta}`; the MusicGen render format is the first.
+**Sources are plugins.** A source implements `list()/readTags()/streamUrl()/cover()` (and optionally `stems()`): native files (done), stem sets (done), Subsonic/OpenSubsonic (next), streaming-service plugins written by anyone. The notes/playlist database is source-agnostic, so annotations follow a recording across sources. **Stem formats are plugins too**: a loader turns "a folder/file" into `{stems[], clips?, sections?, meta}`; the bootleg stem format is the first.
 
 Next slices: notes UI (rating widget, note composer at the playhead, markers on the seek bar, provenance editor), import/export buttons, source/stem-format plugin interface, then the Tauri shell.
 

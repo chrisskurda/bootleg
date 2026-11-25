@@ -1,4 +1,4 @@
-// Plays a stem render: every stem decoded, started together on one clock through its own fader (the audition page's engine).
+// Plays a stem set: every stem decoded, started together on one clock through its own fader (the audition page's engine).
 // Each stem is also tapped before its fader and handed to the visualizer (feed.addStem), so per-stem visuals follow the music even when a stem is muted.
 // run fn over items with at most `limit` in flight (decoded stems are large; this bounds the peak memory)
 async function pool(items, limit, fn) { const out = new Array(items.length); let i = 0; await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } })); return out; }
