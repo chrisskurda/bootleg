@@ -154,10 +154,25 @@ async function saveText(name, text, mime) {
 }
 const notes = initNotes({ player, lib, h, fmt, toast, show, saveText, $ });
 
+// ------------------------------------------------------------------ desktop self-test (BOOTLEG_SELFTEST=<music dir> BOOTLEG_SELFTEST_OUT=<file>): proves the packaged app can scan, tag, stream and analyse real files
+async function selfTest(dir) {
+  const out = { ok: false }, wait = async (f, ms = 20000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting for ' + f); await new Promise(r => setTimeout(r, 100)); } };
+  try {
+    await addSources(await scanFolderTauri(dir), 'self-test'); await wait(() => (lib.tracks.length || lib.renders.length) && lib.tracks.every(t => t.tagged));
+    out.tracks = lib.tracks.length; out.renders = lib.renders.length; out.firstTitle = lib.sortedTracks()[0]?.title; out.cover = lib.tracks.some(t => !!t.coverUrl);
+    if (lib.tracks.length) { await player.playList(lib.sortedTracks(), 0); await wait(() => player.playing && player.pos() > 0.7); let peak = 0; for (let i = 0; i < 20; i++) { const A = feed.update(0.05); peak = Math.max(peak, ...A.spectrum); await new Promise(r => setTimeout(r, 50)); } out.pos = player.pos(); out.peak = peak; out.mode = player.mode; }
+    if (lib.renders.length) { await player.playList([lib.renders[0]], 0); await wait(() => player.mode === 'deck' && player.deck.stems.length > 0 && player.playing && player.pos() > 0.7); out.stems = player.deck.stems.length; }
+    await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
+    out.ok = true;
+  } catch (e) { out.error = String(e && e.message || e); }
+  await TAURI.core.invoke('selftest_done', { result: JSON.stringify(out) });
+}
+
 // ------------------------------------------------------------------ start
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
   await viz.init(); updateBar(); renderAll();
   if (TAURI) for (const dir of store.get('roots', [])) { try { await lib.add(await scanFolderTauri(dir)); } catch (e) { console.warn('could not rescan', dir, e); } }
+  if (TAURI) { const dir = await TAURI.core.invoke('selftest_config'); if (dir) selfTest(dir); }
   window.__bootleg = { notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

@@ -1,0 +1,21 @@
+[package]
+name = "bootleg"
+version = "0.1.0"
+description = "bootleg — a music player with stem mixing, notes and live visualizers."
+license = "MIT"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

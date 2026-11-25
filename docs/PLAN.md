@@ -43,3 +43,7 @@ Target user: someone with a **big library** who catalogs it — live-performance
 **Sources are plugins.** A source implements `list()/readTags()/streamUrl()/cover()` (and optionally `stems()`): native files (done), stem renders (done), Subsonic/OpenSubsonic (next), streaming-service plugins written by anyone. The notes/playlist database is source-agnostic, so annotations follow a recording across sources. **Stem formats are plugins too**: a loader turns "a folder/file" into `{stems[], clips?, sections?, meta}`; the MusicGen render format is the first.
 
 Next slices: notes UI (rating widget, note composer at the playhead, markers on the seek bar, provenance editor), import/export buttons, source/stem-format plugin interface, then the Tauri shell.
+
+## Status (v0.1)
+Done: library + tags (mp3/flac/m4a), stem renders with live mixer, visualizer host, notes/ratings/provenance/playlists with JSON + M3U import/export, Tauri desktop shell (asset-protocol streaming scoped to what the user picks; headless self-test via `BOOTLEG_SELFTEST`). UI stack: plain ES modules, no bundler.
+Later: Subsonic source, source/stem-format plugin interface, spectrum over postMessage for sandboxed packs, signing. After the player is solid: **bootleg-bridge-thing** (separate repo) — plugin that exposes player controls and shows the visualizer elsewhere.
