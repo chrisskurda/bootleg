@@ -1,0 +1,17 @@
+import { NotesStore, toM3U, parseM3U, matchEntries } from '../src/lib/notes.js';
+let bad = 0; const t = (n, ok, note = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${note ? '   ' + note : ''}`); if (!ok) bad++; };
+const a = new NotesStore(), k = 'local:vinyl-side-a';
+await a.setRating(k, 4.3); t('rating clamps to half stars', (await a.get(k)).rating === 4.5);
+await a.setProvenance(k, { kind: 'vinyl-rip', date: '2026-03-02', device: 'Technics SL-1200 → Audient iD14', note: 'cleaned stylus first' }); await a.setTags(k, ['rip', ' rip', 'favorites']);
+await a.addNote(k, { text: 'crackle here', at: 61.5 }); const n2 = await a.addNote(k, { text: 'whole album story', }); await a.addNote(k, { text: 'solo', at: 10, to: 40 });
+t('timeline is ordered and excludes whole-recording notes', (await a.timeline(k)).map(n => n.at).join() === '10,61.5');
+t('find by text across notes and provenance', (await a.find({ text: 'technics' })).length === 1 && (await a.find({ minRating: 5 })).length === 0 && (await a.find({ tag: 'rip' })).length === 1);
+const doc = JSON.parse(JSON.stringify(await a.export())), b = new NotesStore(); const r1 = await b.import(doc); t('export → import into an empty store', r1.added === 1 && (await b.get(k)).notes.length === 3);
+await b.addNote(k, { text: 'from the other device', at: 99 }); await a.import(await b.export()); t('merge unions notes from both sides without duplicates', (await a.get(k)).notes.length === 4 && (await a.import(await b.export()), (await a.get(k)).notes.length === 4));
+let threw = false; try { await a.import({ format: 'x' }); } catch { threw = true; } t('rejects foreign files', threw);
+const tracks = [{ title: 'Café', artist: 'The Quarterlies', album: 'Funk', duration: 4, src: { name: '01 Café.flac' } }, { title: 'Low Pressure', artist: 'The Isobars', src: { name: 'x.m4a' } }];
+const m3u = toM3U('Mix', tracks.map(x => ({ ...x, path: '/music/' + x.src.name })), { relativeTo: '/music' }), p = parseM3U(m3u);
+t('M3U round trip keeps name, artist/title, order', p.name === 'Mix' && p.items.length === 2 && p.items[0].artist === 'The Quarterlies' && p.items[0].title === 'Café' && p.items[0].path === '01 Café.flac');
+t('entries resolve by file name, then artist+title, then title', matchEntries(parseM3U('#EXTINF:1,The Isobars - Low Pressure\nelsewhere/zzz.mp3\n01 Café.flac\n'), tracks).map(m => m.track?.title).join() === 'Low Pressure,Café');
+const pl = await a.savePlaylist({ name: 'Road', items: ['local:1', 'local:2'] }); t('playlists persist and export with the notes file', (await a.playlists()).length === 1 && (await a.export()).playlists[0].id === pl.id);
+console.log(bad ? `\n${bad} FAILED` : '\nall notes tests pass'); process.exit(bad ? 1 : 0);

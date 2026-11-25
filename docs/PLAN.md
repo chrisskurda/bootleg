@@ -31,3 +31,15 @@ Known gap: spectrum and waveform are not yet carried over `postMessage`, so a *s
 - Where the library index lives (IndexedDB on web, SQLite via Tauri on desktop?).
 - How much of the audition page (queue, A/B deck, markers, grading) is carried over versus rethought.
 - Sandboxing third-party packs: iframe `sandbox` with a `postMessage` feature transport (needs the spectrum/wave transport above).
+
+## Library data model, notes and sources (decided 2026-11)
+
+Target user: someone with a **big library** who catalogs it — live-performance memories, stories behind a recording, provenance ("vinyl rip on this date", "retail CD", "mix-CD rip", "recorded at the show on device X"), ratings, organizing notes.
+
+**Annotations** (`src/lib/notes.js`, implemented + tested): per-track rating (half stars), tags, free-form notes, **timeline notes** (`at` seconds, optional `to` for a range → shown on the seek bar), and a structured **provenance** record (kind, date, device, venue, source, note). Keyed by track key (`sourceKind:id`) with an optional content fingerprint so notes survive moves/re-imports. IndexedDB in the app, memory in tests.
+
+**Import / export** (large libraries): notes + playlists as one JSON file (`bootleg-notes` v1, merge on import: newer record wins, notes unioned by id); playlists as M3U/M3U8 (read/write, resolved by file name → artist+title → title). Later: CSV for ratings/notes, and reading other apps' exports.
+
+**Sources are plugins.** A source implements `list()/readTags()/streamUrl()/cover()` (and optionally `stems()`): native files (done), stem renders (done), Subsonic/OpenSubsonic (next), streaming-service plugins written by anyone. The notes/playlist database is source-agnostic, so annotations follow a recording across sources. **Stem formats are plugins too**: a loader turns "a folder/file" into `{stems[], clips?, sections?, meta}`; the MusicGen render format is the first.
+
+Next slices: notes UI (rating widget, note composer at the playhead, markers on the seek bar, provenance editor), import/export buttons, source/stem-format plugin interface, then the Tauri shell.
