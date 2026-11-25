@@ -73,8 +73,8 @@ fn soap(url: &str, svc: &str, action: &str, args: &str) -> Result<String, String
 fn hms(secs: f64) -> String { let s = secs.max(0.0) as u64; format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60) }
 fn parse_hms(s: &str) -> f64 { let p: Vec<f64> = s.split(':').map(|x| x.parse().unwrap_or(0.0)).collect(); if p.len() == 3 { p[0] * 3600.0 + p[1] * 60.0 + p[2] } else { 0.0 } }
 
-pub fn play(av: &str, url: &str, title: &str, artist: &str, album: &str, mime: &str) -> Result<(), String> {
-    let didl = format!("<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"><item id=\"0\" parentID=\"-1\" restricted=\"1\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album><upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo=\"http-get:*:{}:*\">{}</res></item></DIDL-Lite>", escape(title), escape(artist), escape(artist), escape(album), mime, escape(url));
+pub fn play(av: &str, url: &str, title: &str, artist: &str, album: &str, mime: &str, art: &str) -> Result<(), String> {
+    let didl = format!("<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"><item id=\"0\" parentID=\"-1\" restricted=\"1\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album>{}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo=\"http-get:*:{}:*\">{}</res></item></DIDL-Lite>", escape(title), escape(artist), escape(artist), escape(album), if art.is_empty() { String::new() } else { format!("<upnp:albumArtURI>{}</upnp:albumArtURI>", escape(art)) }, mime, escape(url));
     soap(av, AV, "SetAVTransportURI", &format!("<InstanceID>0</InstanceID><CurrentURI>{}</CurrentURI><CurrentURIMetaData>{}</CurrentURIMetaData>", escape(url), escape(&didl)))?;
     soap(av, AV, "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>").map(|_| ())
 }

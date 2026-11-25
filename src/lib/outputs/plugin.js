@@ -6,7 +6,7 @@
 //     id: 'dlna', name: 'DLNA / UPnP',
 //     async discover({ timeoutMs }) → Device[]            // find devices on the network
 //     async add?(input)             → Device              // optional: add one by address (networks that block discovery)
-//     async play(device, { url, title, artist, album, mime, duration })   // start this URL (already reachable from the device)
+//     async play(device, { url, title, artist, album, mime, duration, art })   // art: cover image URL the device can fetch (optional)   // start this URL (already reachable from the device)
 //     async pause(device)  async resume(device)  async stop(device)
 //     async seek(device, seconds)  async volume(device, 0..1)
 //     async status?(device) → { state: 'playing'|'paused'|'stopped', pos, dur }

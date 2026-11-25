@@ -4,6 +4,7 @@
 import http from 'node:http'; import fs from 'node:fs'; import dgram from 'node:dgram';
 const logFile = process.argv[2], log = o => { if (logFile) fs.appendFileSync(logFile, JSON.stringify(o) + '\n'); };
 let state = 'STOPPED', uri = '', pos = 0, vol = 20;
+const getArt = async u => { try { const r = await fetch(u); const b = await r.arrayBuffer(); log({ artFetched: r.status, bytes: b.byteLength, type: r.headers.get('content-type') }); } catch (e) { log({ artError: String(e) }); } };
 const unesc = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 const tag = (x, n) => { const m = new RegExp(`<${n}[^>]*>([\\s\\S]*?)</${n}>`).exec(x); return m ? unesc(m[1]) : ''; };
 const srv = http.createServer((req, res) => {
@@ -12,7 +13,7 @@ const srv = http.createServer((req, res) => {
   let body = ''; req.on('data', c => body += c); req.on('end', async () => {
     const action = /#(\w+)"?/.exec(req.headers.soapaction || '')?.[1]; if (!action) { res.writeHead(404); return res.end(); }
     const ok = inner => { res.setHeader('content-type', 'text/xml'); res.end(`<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:${action}Response xmlns:u="x">${inner}</u:${action}Response></s:Body></s:Envelope>`); };
-    if (action === 'SetAVTransportURI') { uri = tag(body, 'CurrentURI'); const meta = tag(body, 'CurrentURIMetaData'); log({ action, uri, title: tag(meta, 'dc:title'), artist: tag(meta, 'upnp:artist'), mime: /http-get:\*:([^:]+):/.exec(meta)?.[1] }); return ok(''); }
+    if (action === 'SetAVTransportURI') { uri = tag(body, 'CurrentURI'); const meta = tag(body, 'CurrentURIMetaData'); log({ action, uri, art: tag(meta, 'upnp:albumArtURI'), title: tag(meta, 'dc:title'), artist: tag(meta, 'upnp:artist'), mime: /http-get:\*:([^:]+):/.exec(meta)?.[1] }); const art = tag(meta, 'upnp:albumArtURI'); if (art) getArt(art); return ok(''); }
     if (action === 'Play') { state = 'PLAYING'; log({ action }); ok(''); if (uri) { try { const r = await fetch(uri, { headers: { Range: 'bytes=0-99' } }); const b = await r.arrayBuffer(); log({ fetched: r.status, bytes: b.byteLength, type: r.headers.get('content-type') }); } catch (e) { log({ fetchError: String(e) }); } } return; }
     if (action === 'Pause') { state = 'PAUSED'; log({ action }); return ok(''); }
     if (action === 'Stop') { state = 'STOPPED'; log({ action }); return ok(''); }

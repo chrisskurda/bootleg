@@ -320,10 +320,18 @@ async function paintSettings() {
 
 // ------------------------------------------------------------------ outputs (cast targets)
 const SUFFIX_MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
+const artCache = new Map();    // cover URL → URL the device can fetch
+async function artFor(item) {
+  const u = item.coverUrl; if (!u) return null; if (artCache.has(u)) return artCache.get(u);
+  let out = null; try {
+    if (/^https?:/.test(u)) out = u;                                    // a server's own cover URL is already reachable
+    else if (u.startsWith('blob:') && TAURI) { const b = await (await fetch(u)).blob(), buf = new Uint8Array(await b.arrayBuffer()); let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000)); out = await TAURI.core.invoke('lan_share_bytes', { dataB64: btoa(bin), mime: b.type || 'image/jpeg' }); }
+  } catch { out = null; } artCache.set(u, out); return out;
+}
 const outputs = new Outputs(player, { resolveUrl: async item => {
-  const src = item.kind === 'render' ? item.mix : item.src; if (!src) return null;
-  if (src.kind === 'tauri') return { url: await TAURI.core.invoke('lan_share', { path: src.path }), mime: await TAURI.core.invoke('lan_mime', { path: src.path }) };
-  if (src.kind === 'remote') return { url: src.url(), mime: SUFFIX_MIME[(src.name.split('.').pop() || '').toLowerCase()] || 'audio/mpeg' };
+  const src = item.kind === 'render' ? item.mix : item.src; if (!src) return null; const art = await artFor(item);
+  if (src.kind === 'tauri') return { url: await TAURI.core.invoke('lan_share', { path: src.path }), mime: await TAURI.core.invoke('lan_mime', { path: src.path }), art };
+  if (src.kind === 'remote') return { url: src.url(), mime: SUFFIX_MIME[(src.name.split('.').pop() || '').toLowerCase()] || 'audio/mpeg', art };
   return null;      // browser files live only in this tab: the device cannot reach them
 } });
 function paintOutMenu() {

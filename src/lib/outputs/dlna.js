@@ -6,7 +6,7 @@ export const dlna = {
   id: 'dlna', name: 'DLNA / UPnP',
   async discover({ timeoutMs = 3000 } = {}) { if (!T()) return []; return (await T().invoke('dlna_discover', { timeoutMs })).map(d => ({ ...d, plugin: 'dlna' })); },
   async add(location) { const d = await T().invoke('dlna_add', { location: /^https?:\/\//.test(location) ? location : 'http://' + location }); return { ...d, plugin: 'dlna' }; },
-  play: (d, m) => T().invoke('dlna_play', { av: d.av, url: m.url, title: m.title || '', artist: m.artist || '', album: m.album || '', mime: m.mime || 'audio/mpeg' }),
+  play: (d, m) => T().invoke('dlna_play', { av: d.av, url: m.url, title: m.title || '', artist: m.artist || '', album: m.album || '', mime: m.mime || 'audio/mpeg', art: m.art || null }),
   pause: d => T().invoke('dlna_transport', { av: d.av, action: 'Pause' }),
   resume: d => T().invoke('dlna_transport', { av: d.av, action: 'Play' }),
   stop: d => T().invoke('dlna_transport', { av: d.av, action: 'Stop' }),

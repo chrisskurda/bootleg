@@ -14,7 +14,10 @@ use std::{
 };
 use tiny_http::{Header, Response, Server, StatusCode};
 
-type Shares = Arc<Mutex<HashMap<String, PathBuf>>>;
+trait ReadSeek: Read + Seek + Send {}
+impl<T: Read + Seek + Send> ReadSeek for T {}
+enum Share { File(PathBuf), Bytes(Vec<u8>, String) }
+type Shares = Arc<Mutex<HashMap<String, Share>>>;
 struct Lan { shares: Shares, base: String }
 static LAN: OnceLock<Lan> = OnceLock::new();
 
@@ -36,10 +39,12 @@ fn token() -> String { let mut o = String::new(); for _ in 0..2 { o += &format!(
 fn serve(req: tiny_http::Request, shares: Shares) {
     let url = req.url().to_string();
     let id = url.trim_start_matches("/m/").split(['.', '?']).next().unwrap_or("").to_string();
-    let path = shares.lock().ok().and_then(|m| m.get(&id).cloned());
-    let Some(path) = path.filter(|_| url.starts_with("/m/")) else { let _ = req.respond(Response::empty(404)); return; };
-    let Ok(mut f) = File::open(&path) else { let _ = req.respond(Response::empty(404)); return; };
-    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let found = shares.lock().ok().and_then(|m| match m.get(&id) { Some(Share::File(p)) => Some(Share::File(p.clone())), Some(Share::Bytes(b, t)) => Some(Share::Bytes(b.clone(), t.clone())), None => None });
+    let Some(share) = found.filter(|_| url.starts_with("/m/")) else { let _ = req.respond(Response::empty(404)); return; };
+    let (mut f, ctype, len): (Box<dyn ReadSeek>, String, u64) = match share {
+        Share::File(p) => match File::open(&p) { Ok(f) => { let l = f.metadata().map(|m| m.len()).unwrap_or(0); (Box::new(f), mime(&p).to_string(), l) } Err(_) => { let _ = req.respond(Response::empty(404)); return; } },
+        Share::Bytes(b, t) => { let l = b.len() as u64; (Box::new(std::io::Cursor::new(b)), t, l) }
+    };
     let hdr = |k: &str, v: &str| Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap();
     let range = req.headers().iter().find(|h| h.field.equiv("Range")).map(|h| h.value.as_str().to_string());
     let (start, end, partial) = match range.as_deref().and_then(|r| r.strip_prefix("bytes=")) {
@@ -48,7 +53,7 @@ fn serve(req: tiny_http::Request, shares: Shares) {
     };
     if len == 0 || start > end { let _ = req.respond(Response::empty(416)); return; }
     let n = end - start + 1; let _ = f.seek(SeekFrom::Start(start));
-    let mut headers = vec![hdr("Content-Type", mime(&path)), hdr("Accept-Ranges", "bytes"), hdr("transferMode.dlna.org", "Streaming"), hdr("contentFeatures.dlna.org", "DLNA.ORG_OP=01;DLNA.ORG_CI=0"), hdr("Access-Control-Allow-Origin", "*")];
+    let mut headers = vec![hdr("Content-Type", &ctype), hdr("Accept-Ranges", "bytes"), hdr("transferMode.dlna.org", "Streaming"), hdr("contentFeatures.dlna.org", "DLNA.ORG_OP=01;DLNA.ORG_CI=0"), hdr("Access-Control-Allow-Origin", "*")];
     if partial { headers.push(hdr("Content-Range", &format!("bytes {start}-{end}/{len}"))); }
     let _ = req.respond(Response::new(StatusCode(if partial { 206 } else { 200 }), headers, f.take(n), Some(n as usize), None));
 }
@@ -67,6 +72,12 @@ fn lan() -> Result<&'static Lan, String> {
 pub fn share(path: &Path) -> Result<String, String> {
     let l = lan()?; let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("bin").to_ascii_lowercase();
     let mut m = l.shares.lock().map_err(|e| e.to_string())?;
-    if let Some((k, _)) = m.iter().find(|(_, p)| p.as_path() == path) { return Ok(format!("{}/m/{}.{}", l.base, k, ext)); }
-    let t = token(); m.insert(t.clone(), path.to_path_buf()); Ok(format!("{}/m/{}.{}", l.base, t, ext))
+    if let Some((k, _)) = m.iter().find(|(_, p)| matches!(p, Share::File(q) if q.as_path() == path)) { return Ok(format!("{}/m/{}.{}", l.base, k, ext)); }
+    let t = token(); m.insert(t.clone(), Share::File(path.to_path_buf())); Ok(format!("{}/m/{}.{}", l.base, t, ext))
+}
+
+/// Shares in-memory bytes (e.g. cover art) and returns the LAN URL.
+pub fn share_bytes(data: Vec<u8>, mime: &str) -> Result<String, String> {
+    let l = lan()?; let ext = match mime { "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", _ => "bin" };
+    let t = token(); l.shares.lock().map_err(|e| e.to_string())?.insert(t.clone(), Share::Bytes(data, mime.to_string())); Ok(format!("{}/m/{}.{}", l.base, t, ext))
 }

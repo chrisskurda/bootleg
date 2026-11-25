@@ -35,6 +35,14 @@ fn lan_share(app: AppHandle, path: String) -> Result<String, String> {
     if !app.asset_protocol_scope().is_allowed(&p) { return Err("that file has not been opened in bootleg".into()); }
     lan::share(&p)
 }
+/// Shares small in-memory data (cover art) — base64 from the page — and returns its LAN URL.
+#[tauri::command]
+fn lan_share_bytes(data_b64: String, mime: String) -> Result<String, String> {
+    use base64::Engine;
+    if data_b64.len() > 12_000_000 { return Err("too large".into()); }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
+    lan::share_bytes(bytes, &mime)
+}
 #[tauri::command]
 fn lan_mime(path: String) -> String { lan::mime_of(&path).to_string() }
 #[tauri::command]
@@ -44,7 +52,7 @@ async fn dlna_discover(timeout_ms: u64) -> Result<Vec<dlna::Device>, String> {
 #[tauri::command]
 async fn dlna_add(location: String) -> Result<dlna::Device, String> { tauri::async_runtime::spawn_blocking(move || dlna::describe(&location)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
-async fn dlna_play(av: String, url: String, title: String, artist: String, album: String, mime: String) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::play(&av, &url, &title, &artist, &album, &mime)).await.map_err(|e| e.to_string())? }
+async fn dlna_play(av: String, url: String, title: String, artist: String, album: String, mime: String, art: Option<String>) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::play(&av, &url, &title, &artist, &album, &mime, art.as_deref().unwrap_or(""))).await.map_err(|e| e.to_string())? }
 #[tauri::command]
 async fn dlna_transport(av: String, action: String) -> Result<(), String> { tauri::async_runtime::spawn_blocking(move || dlna::transport(&av, &action)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
@@ -77,7 +85,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, lan_share, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .setup(|app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
