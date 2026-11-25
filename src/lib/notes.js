@@ -3,7 +3,7 @@
 // notes survive file moves and re-imports from other sources). Backends: memory (tests) or IndexedDB.
 // Everything round-trips through plain JSON ("bootleg-notes" v1) so a big library can be exported/imported/merged.
 
-export const PROVENANCE_KINDS = ['vinyl-rip', 'cd-rip', 'mix-cd-rip', 'live-recording', 'digital-purchase', 'streaming', 'stem-render', 'other'];
+export const PROVENANCE_KINDS = ['vinyl-rip', 'cd-rip', 'mix-cd-rip', 'live-recording', 'digital-purchase', 'streaming', 'studio-recording', 'mixdown', 'demo', 'rehearsal', 'stem-render', 'other'];
 export const NOTES_FORMAT = 'bootleg-notes', NOTES_VERSION = 1;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -16,7 +16,7 @@ export class IdbBackend {
   async all() { const s = await this._s('readonly'), keys = await this._r(s.getAllKeys()), vals = await this._r(s.getAll()); return keys.map((key, i) => ({ key, value: vals[i] })); }
 }
 
-const blank = key => ({ key, rating: 0, tags: [], notes: [], provenance: null, fingerprint: null, updated: 0 });
+const blank = key => ({ key, rating: 0, status: '', tags: [], notes: [], provenance: null, fingerprint: null, updated: 0 });
 export class NotesStore extends EventTarget {
   constructor(backend = new MemoryBackend()) { super(); this.b = backend; }
   async get(key) { return (await this.b.get('t:' + key)) || blank(key); }
@@ -24,6 +24,7 @@ export class NotesStore extends EventTarget {
   _q = Promise.resolve(); _lock(fn) { const run = this._q.then(fn, fn); this._q = run.catch(() => {}); return run; }
   async _save(rec) { rec.updated = Date.now(); await this.b.put('t:' + rec.key, rec); this.dispatchEvent(new CustomEvent('change', { detail: rec.key })); return rec; }
   async setRating(key, n) { const r = await this.get(key); r.rating = Math.max(0, Math.min(5, Math.round(n * 2) / 2)); return this._save(r); }   // half stars
+  async setStatus(key, st) { const r = await this.get(key); r.status = st || ''; return this._save(r); }
   async setTags(key, tags) { const r = await this.get(key); r.tags = [...new Set(tags.map(s => s.trim()).filter(Boolean))]; return this._save(r); }
   async _setProv(key, p) { const r = await this.get(key); r.provenance = p && { kind: PROVENANCE_KINDS.includes(p.kind) ? p.kind : 'other', date: p.date || '', device: p.device || '', venue: p.venue || '', source: p.source || '', note: p.note || '' }; return this._save(r); }
   async patchProvenance(key, patch) { const r = await this.get(key); return this._setProv(key, { ...(r.provenance || { kind: 'other' }), ...patch }); }
@@ -34,9 +35,10 @@ export class NotesStore extends EventTarget {
   async editNote(key, id, patch) { const r = await this.get(key), n = r.notes.find(x => x.id === id); if (n) Object.assign(n, patch, { id }); return this._save(r); }
   async removeNote(key, id) { const r = await this.get(key); r.notes = r.notes.filter(x => x.id !== id); return this._save(r); }
   async timeline(key) { return (await this.get(key)).notes.filter(n => n.at != null).sort((a, b) => a.at - b.at); }
-  async find({ minRating = 0, tag, text } = {}) { const q = text?.toLowerCase(); return (await this.b.all()).map(x => x.value).filter(r => r.rating >= minRating && (!tag || r.tags.includes(tag)) && (!q || r.notes.some(n => n.text.toLowerCase().includes(q)) || (r.provenance && JSON.stringify(r.provenance).toLowerCase().includes(q)))); }
+  async allTags() { const c = new Map(); for (const { key, value } of await this.b.all()) if (key.startsWith('t:')) for (const g of value.tags || []) c.set(g, (c.get(g) || 0) + 1); return [...c].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); }
+  async find({ minRating = 0, tag, text, status } = {}) { const q = text?.toLowerCase(); return (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating >= minRating && (!tag || r.tags.includes(tag)) && (!status || r.status === status) && (!q || r.notes.some(n => n.text.toLowerCase().includes(q)) || (r.provenance && JSON.stringify(r.provenance).toLowerCase().includes(q)))); }
 
-  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.tags.length || r.notes.length || r.provenance); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
+  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
   // Merge: newer record wins per track; notes are unioned by id so two devices don't lose each other's work.
   async import(doc) {
     if (!doc || doc.format !== NOTES_FORMAT) throw new Error('not a bootleg notes file'); if (doc.version > NOTES_VERSION) throw new Error('notes file is from a newer bootleg');
@@ -52,7 +54,7 @@ export class NotesStore extends EventTarget {
   async deletePlaylist(id) { await this.b.del('p:' + id); }
 }
 
-for (const n of ['setRating', 'setTags', 'setProvenance', 'patchProvenance', 'setFingerprint', 'addNote', 'editNote', 'removeNote']) { const f = NotesStore.prototype[n]; NotesStore.prototype[n] = function (...a) { return this._lock(() => f.apply(this, a)); }; }
+for (const n of ['setRating', 'setStatus', 'setTags', 'setProvenance', 'patchProvenance', 'setFingerprint', 'addNote', 'editNote', 'removeNote']) { const f = NotesStore.prototype[n]; NotesStore.prototype[n] = function (...a) { return this._lock(() => f.apply(this, a)); }; }
 
 // ---- M3U / M3U8 (the interchange format every other player speaks)
 export function toM3U(name, tracks, { relativeTo = '' } = {}) {

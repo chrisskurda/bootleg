@@ -11,6 +11,7 @@
 <div id="app">
   <header class="top">
     <div class="brand"><b>bootleg</b></div>
+    <select id="libSel" class="libsel" aria-label="Library" title="Library"></select>
     <div class="adders">
       <button id="addFolder" class="btn primary">Add folder</button>
       <button id="addFiles" class="btn">Add files</button>
@@ -44,7 +45,7 @@
       <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem renders yet. Add a MusicGen render folder to mute, solo and watch each stem.</div></section>
 
       <section id="view-notes" class="view" hidden>
-        <div class="toolbar"><input id="noteSearch" type="search" placeholder="Search notes, tags, provenance…"><label class="muted">Rating ≥ <select id="noteMin"><option value="0">any</option><option value="3">3</option><option value="4">4</option><option value="4.5">4.5</option><option value="5">5</option></select></label></div>
+        <div class="toolbar"><input id="noteSearch" type="search" placeholder="Search notes, tags, provenance…"><select id="noteTag" aria-label="Tag"><option value="">any tag</option></select><select id="noteStatus" aria-label="Status"><option value="">any status</option><option>idea</option><option>draft</option><option>mixing</option><option>mastered</option><option>released</option></select><label class="muted">Rating ≥ <select id="noteMin"><option value="0">any</option><option value="3">3</option><option value="4">4</option><option value="4.5">4.5</option><option value="5">5</option></select></label></div>
         <div id="noteCards" class="cards"></div><div id="emptyNotes" class="empty"><b>No notes yet.</b><br>Rate a track, or open <i>Now playing</i> and add notes — at a moment in the song, over a range, or about the whole recording. Record where it came from: vinyl rip, CD, live recording, device, date.</div>
       </section>
       <section id="view-playlists" class="view" hidden>

@@ -1,9 +1,10 @@
 // Notes, ratings, provenance, playlists and import/export — the cataloguing side of the player.
 import { parseNfo, buildAlbumNfo, nfoRatingToStars } from './nfo.js';
+import { MODES, STATUSES } from './libraries.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
 export const trackKey = t => !t ? null : t.kind === 'render' ? 'render:' + t.dir : 'file:' + (t.src?.path || t.title) + '#' + (t.src?.size ?? '');
-const KIND_LABEL = { 'vinyl-rip': 'Vinyl rip', 'cd-rip': 'CD rip (retail)', 'mix-cd-rip': 'Mix CD rip', 'live-recording': 'Live recording', 'digital-purchase': 'Digital purchase', streaming: 'Streaming', 'stem-render': 'Stem render', other: 'Other' };
+const KIND_LABEL = { 'vinyl-rip': 'Vinyl rip', 'cd-rip': 'CD rip (retail)', 'mix-cd-rip': 'Mix CD rip', 'live-recording': 'Live recording', 'digital-purchase': 'Digital purchase', streaming: 'Streaming', 'studio-recording': 'Studio recording', mixdown: 'Mixdown', demo: 'Demo', rehearsal: 'Rehearsal', 'stem-render': 'Stem render', other: 'Other' };
 
 export function stars(h, value, onset) {
   const el = h('span', { class: 'stars', role: 'group', 'aria-label': `Rating ${value || 'none'}` });
@@ -14,9 +15,10 @@ export function stars(h, value, onset) {
   return el;
 }
 
-export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
+export function initNotes({ player, lib, libs, h, fmt, toast, show, saveText, $ }) {
   let backend; try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
+  libs.onchange = () => paint();
   const refresh = async () => { curKey = trackKey(player.item); cur = curKey ? await store.get(curKey) : null; paint(); paintMarks(); paintBarStars(); };
   store.addEventListener('change', () => { refresh(); paintLists(); });
   player.addEventListener('change', () => { if (trackKey(player.item) !== curKey) { rangeFrom = null; refresh(); } else paintMarks(); });
@@ -37,24 +39,26 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
   // ---- the panel under the visualizer
   const prov = () => cur?.provenance || { kind: 'other', date: '', device: '', venue: '', source: '', note: '' };
   function paint() {
-    const p = $('#notesPanel'); if (!cur) { p.hidden = true; return; } p.hidden = false; const it = player.item, pv = prov();
+    const p = $('#notesPanel'); if (!cur) { p.hidden = true; return; } p.hidden = false; const it = player.item, pv = prov(), mode = MODES[libs.modeOf(it)], provKinds = [...new Set([...mode.provenance, pv.kind])];
     const field = (k, label, ph, type = 'text') => h('label', { class: 'f' }, h('span', {}, label), h('input', { type, value: pv[k] || '', placeholder: ph, onchange: e => store.patchProvenance(curKey, { [k]: e.target.value }) }));
     const ta = h('textarea', { id: 'noteText', rows: 2, placeholder: 'A note about this moment, or the whole recording…  (Cmd/Ctrl+Enter to add)' });
-    const add = async (at, to) => { const text = ta.value.trim(); if (!text) { ta.focus(); return; } await store.addNote(curKey, { text, at, to }); ta.value = ''; rangeFrom = null; };
+    const kindSel = h('select', { id: 'noteKind', title: 'What kind of note' }, ...mode.noteKinds.map(([k, l]) => h('option', { value: k }, l)));
+    const add = async (at, to) => { const text = ta.value.trim(); if (!text) { ta.focus(); return; } await store.addNote(curKey, { text, at, to, kind: kindSel.value }); ta.value = ''; rangeFrom = null; };
     ta.onkeydown = e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') add(player.pos()); };
     const list = [...cur.notes].sort((a, b) => (a.at ?? -1) - (b.at ?? -1) || a.created - b.created).map(n => noteRow(n));
     p.replaceChildren(
-      h('h4', {}, 'Notes — ', h('span', { class: 'muted' }, it.title)),
+      h('h4', {}, 'Notes — ', h('span', { class: 'muted' }, it.title), h('span', { class: 'chip' }, mode.label + ' library')),
       h('div', { class: 'np-top' },
         h('div', {}, h('div', { class: 'lbl' }, 'Rating'), stars(h, cur.rating, v => store.setRating(curKey, v))),
+        mode.status ? h('label', { class: 'f' }, h('span', {}, 'Status'), h('select', { onchange: e => store.setStatus(curKey, e.target.value) }, h('option', { value: '' }, '—'), ...STATUSES.map(x => h('option', { value: x, selected: x === cur.status }, x)))) : '',
         h('label', { class: 'f grow' }, h('span', {}, 'Tags (comma separated)'), h('input', { value: cur.tags.join(', '), placeholder: 'live, favorite, to-clean…', onchange: e => store.setTags(curKey, e.target.value.split(',')) }))),
-      h('details', { class: 'prov', open: !!cur.provenance }, h('summary', {}, 'Where this recording came from'),
+      h('details', { class: 'prov', open: !!cur.provenance }, h('summary', {}, (mode.status ? 'How this was recorded / where it came from' : 'Where this recording came from')),
         h('div', { class: 'provgrid' },
-          h('label', { class: 'f' }, h('span', {}, 'Kind'), h('select', { onchange: e => store.patchProvenance(curKey, { kind: e.target.value }) }, ...PROVENANCE_KINDS.map(k => h('option', { value: k, selected: k === pv.kind }, KIND_LABEL[k])))),
+          h('label', { class: 'f' }, h('span', {}, 'Kind'), h('select', { onchange: e => store.patchProvenance(curKey, { kind: e.target.value }) }, ...provKinds.map(k => h('option', { value: k, selected: k === pv.kind }, KIND_LABEL[k] || k)))),
           field('date', 'Date', '', 'date'), field('device', 'Device / gear', 'Technics SL-1200 → Audient iD14'), field('venue', 'Venue / place', 'Where it was recorded or bought'), field('source', 'Source', 'Disc, seller, mix-CD title, URL…'), field('note', 'Notes on the transfer', 'cleaned stylus, azimuth fixed…'))),
       nfoBlock(it),
       h('div', { class: 'composer' }, ta,
-        h('div', { class: 'cbtns' },
+        h('div', { class: 'cbtns' }, kindSel,
           h('button', { class: 'btn primary', onclick: () => add(player.pos()) }, `Add at ${fmt(player.pos())}`),
           h('button', { class: 'btn', title: 'Mark a section: click once to start, again to end', onclick: () => { if (rangeFrom == null) { rangeFrom = player.pos(); toast(`Range starts at ${fmt(rangeFrom)} — click again to end it`); e2(); } else { const a = Math.min(rangeFrom, player.pos()), b = Math.max(rangeFrom, player.pos()); add(a, b); } } }, rangeFrom == null ? 'Mark a range' : `Range from ${fmt(rangeFrom)} — end here`),
           h('button', { class: 'btn', onclick: () => add(null, null) }, 'Add to whole recording'))),
@@ -80,7 +84,7 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
     const row = h('div', { class: 'note' });
     const view = () => row.replaceChildren(
       n.at != null ? h('button', { class: 'chip time', title: 'Jump here', onclick: () => player.seek(n.at) }, fmt(n.at) + (n.to != null ? '–' + fmt(n.to) : '')) : h('span', { class: 'chip' }, 'whole'),
-      h('span', { class: 'ntext' }, n.text),
+      n.kind && n.kind !== 'note' ? h('span', { class: 'chip kind' }, n.kind) : '', h('span', { class: 'ntext' }, n.text),
       h('span', { class: 'nacts' }, h('button', { class: 'mini', onclick: edit }, 'edit'), h('button', { class: 'mini', onclick: () => store.removeNote(curKey, n.id) }, '✕')));
     const edit = () => { const i = h('textarea', { rows: 2 }, n.text); i.value = n.text; row.replaceChildren(i, h('button', { class: 'mini', onclick: () => store.editNote(curKey, n.id, { text: i.value.trim() || n.text }) }, 'save'), h('button', { class: 'mini', onclick: view }, 'cancel')); i.focus(); };
     view(); return row;
@@ -90,13 +94,14 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
   // ---- Notes browser: everything annotated, across the library
   const byKey = () => { const m = new Map(); for (const t of [...lib.tracks, ...lib.renders]) m.set(trackKey(t), t); return m; };
   async function paintLists() {
-    const q = $('#noteSearch').value, minR = +$('#noteMin').value, recs = await store.find({ minRating: minR, text: q || undefined }), keys = byKey();
-    const rows = recs.filter(r => r.rating || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated).map(r => {
+    const q = $('#noteSearch').value, minR = +$('#noteMin').value, tag = $('#noteTag').value, status = $('#noteStatus').value, recs = await store.find({ minRating: minR, text: q || undefined, tag: tag || undefined, status: status || undefined }), keys = byKey();
+    const tags = await store.allTags(), tsel = $('#noteTag'); if (tsel.options.length !== tags.length + 1 || [...tsel.options].slice(1).some((o, i) => o.value !== tags[i][0])) { tsel.replaceChildren(h('option', { value: '' }, 'any tag'), ...tags.map(([g, n]) => h('option', { value: g, selected: g === tag }, `${g} (${n})`))); }
+    const rows = recs.filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated).map(r => {
       const t = keys.get(r.key), pv = r.provenance;
       return h('div', { class: 'ncard' },
         h('div', { class: 'nc-head' }, h('b', {}, t ? t.title : r.key.replace(/^file:|#\d*$/g, '')), h('span', { class: 'muted' }, t ? [t.artist, t.album].filter(Boolean).join(' · ') : 'not in the current library'), r.rating ? stars(h, r.rating, v => store.setRating(r.key, v)) : '', t ? h('button', { class: 'mini', onclick: () => player.playList([t], 0) }, '▶ play') : ''),
         pv ? h('div', { class: 'nc-prov' }, h('span', { class: 'chip' }, KIND_LABEL[pv.kind] || pv.kind), ' ', [pv.date, pv.device, pv.venue, pv.source].filter(Boolean).join(' · '), pv.note ? ' — ' + pv.note : '') : '',
-        r.tags.length ? h('div', {}, ...r.tags.map(x => h('span', { class: 'chip' }, x))) : '',
+        r.tags.length || r.status ? h('div', {}, r.status ? h('span', { class: 'chip status' }, r.status) : '', ...r.tags.map(x => h('button', { class: 'chip tag', title: 'Filter by this tag', onclick: () => { $('#noteTag').value = x; paintLists(); } }, '#' + x))) : '',
         ...r.notes.slice(0, 4).map(n => h('div', { class: 'nc-note' }, h('span', { class: 'chip' }, n.at != null ? fmt(n.at) : 'whole'), ' ', n.text)), r.notes.length > 4 ? h('div', { class: 'muted small' }, `+ ${r.notes.length - 4} more`) : '');
     });
     $('#noteCards').replaceChildren(...rows); $('#emptyNotes').hidden = rows.length > 0;
@@ -104,7 +109,7 @@ export function initNotes({ player, lib, h, fmt, toast, show, saveText, $ }) {
       h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'), h('button', { class: 'mini', onclick: () => store.deletePlaylist(p.id).then(paintLists) }, 'delete')))));
     $('#emptyPl').hidden = pls.length > 0;
   }
-  $('#noteSearch').oninput = paintLists; $('#noteMin').onchange = paintLists;
+  $('#noteSearch').oninput = paintLists; $('#noteMin').onchange = paintLists; $('#noteTag').onchange = paintLists; $('#noteStatus').onchange = paintLists;
 
   // ---- playlists
   const resolve = p => { const m = byKey(); return p.items.map(k => m.get(k)).filter(Boolean); };

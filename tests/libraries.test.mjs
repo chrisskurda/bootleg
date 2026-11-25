@@ -1,0 +1,13 @@
+import { Libraries, MODES } from '../src/lib/libraries.js';
+let bad = 0; const t = (n, ok, note = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${note ? '   ' + note : ''}`); if (!ok) bad++; };
+const mem = o => { const m = { ...o }; return { get: (k, d) => k in m ? JSON.parse(JSON.stringify(m[k])) : d, set: (k, v) => { m[k] = JSON.parse(JSON.stringify(v)); }, m }; };
+const s = mem({ roots: ['/music/a'] }), L = new Libraries(s);
+t('migrates the old single list of roots into a default listening library', L.list.length === 1 && L.list[0].roots[0] === '/music/a' && L.list[0].mode === 'listening' && L.active === 'music');
+const studio = L.add('My songs', 'studio'); L.addRoot(studio.id, '/work/songs'); L.addRoot(studio.id, '/work/songs');
+t('a studio library with its own roots (no duplicates)', studio.mode === 'studio' && studio.roots.length === 1 && L.ofRoot('/work/songs').id === studio.id && L.allRoots().length === 2);
+const L2 = new Libraries(s); t('persists across loads', L2.list.length === 2 && L2.get(studio.id).name === 'My songs');
+L.setActive(studio.id); t('the mode of an item comes from the active library when it is in it', L.modeOf({ libs: new Set(['music', studio.id]) }) === 'studio' && L.modeOf({ libs: new Set(['music']) }) === 'listening');
+L.setActive('all'); t('"all libraries" is a valid view; adds go to the first library', L.active === 'all' && L.target().id === 'music');
+t('cannot delete the last library; deleting one moves active', L.remove(studio.id) && !L.remove('music') && L.active === 'all' || L.active === 'music');
+t('studio mode offers to-dos, versions and a status; listening does not', MODES.studio.status && !MODES.listening.status && MODES.studio.noteKinds.some(k => k[0] === 'todo') && !MODES.listening.noteKinds.some(k => k[0] === 'todo'));
+console.log(bad ? `\n${bad} FAILED` : '\nall libraries tests pass'); process.exit(bad ? 1 : 0);
