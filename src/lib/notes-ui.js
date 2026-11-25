@@ -19,7 +19,7 @@ export function stars(h, value, onset) {
 export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $ }) {
   const drafts = new Map(); let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
-  libs.onchange = () => paint();
+  libs.onchange = () => paint(); $('#notesPanel').addEventListener('focusout', () => setTimeout(() => { if (pendingPaint) paint(); }, 0));
   const refresh = async () => { curKey = trackKey(player.item); cur = curKey ? await store.get(curKey) : null; paint(); paintMarks(); paintBarStars(); };
   store.addEventListener('change', () => { refresh(); paintLists(); });
   player.addEventListener('change', () => { if (trackKey(player.item) !== curKey) { rangeFrom = null; refresh(); } else paintMarks(); });
@@ -39,8 +39,12 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
 
   // ---- the panel under the visualizer
   const prov = () => cur?.provenance || { kind: 'other', date: '', device: '', venue: '', source: '', note: '' };
+  let pendingPaint = false;
   function paint() {
-    const p = $('#notesPanel'); if (!cur) { p.hidden = true; return; } p.hidden = false; const it = player.item, pv = prov(), mode = MODES[libs.modeOf(it)], provKinds = [...new Set([...mode.provenance, pv.kind])];
+    const p = $('#notesPanel'); if (!cur) { p.hidden = true; return; }
+    // never rebuild the form under someone who is typing in it: wait until the field loses focus
+    const ae = document.activeElement; if (!p.hidden && p.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) { pendingPaint = true; return; }
+    pendingPaint = false; p.hidden = false; const it = player.item, pv = prov(), mode = MODES[libs.modeOf(it)], provKinds = [...new Set([...mode.provenance, pv.kind])];
     const field = (k, label, ph, type = 'text') => h('label', { class: 'f' }, h('span', {}, label), h('input', { type, value: pv[k] || '', placeholder: ph, onchange: e => store.patchProvenance(curKey, { [k]: e.target.value }) }));
     const ta = h('textarea', { id: 'noteText', rows: 2, placeholder: 'A note about this moment, or the whole recording…  (Cmd/Ctrl+Enter to add)' });
     const kindSel = h('select', { id: 'noteKind', title: 'What kind of note' }, ...mode.noteKinds.map(([k, l]) => h('option', { value: k }, l)));

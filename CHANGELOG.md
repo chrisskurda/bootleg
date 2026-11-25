@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- The notes panel no longer rebuilds while you are typing in one of its fields (a rating, status or tag change elsewhere could wipe what you had just typed).
+
 ## [0.1.0] - 2026-11-25
 
 First release: a music player for large libraries, with stem mixing, notes and live visualizers. Runs in a browser and as a desktop app (macOS, Linux) built with Tauri.
