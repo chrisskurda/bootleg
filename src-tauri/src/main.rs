@@ -6,7 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{env, fs, path::PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_fs::FsExt;
 
 #[tauri::command]
@@ -40,7 +40,11 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![allow_path, selftest_config, selftest_done])
         .setup(|app| {
-            if let Some(w) = app.get_webview_window("main") { let _ = w.set_focus(); }
+            // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
+            let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
+            if env::var("BOOTLEG_SELFTEST").is_ok() { b = b.initialization_script("window.__BOOTLEG_SELFTEST = true;"); }
+            let w = b.build()?;
+            let _ = w.set_focus();
             Ok(())
         })
         .run(tauri::generate_context!())

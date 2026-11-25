@@ -15,8 +15,8 @@ export function stars(h, value, onset) {
   return el;
 }
 
-export function initNotes({ player, lib, libs, h, fmt, toast, show, saveText, $ }) {
-  let backend; try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
+export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $ }) {
+  let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
   libs.onchange = () => paint();
   const refresh = async () => { curKey = trackKey(player.item); cur = curKey ? await store.get(curKey) : null; paint(); paintMarks(); paintBarStars(); };
