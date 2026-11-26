@@ -18,3 +18,6 @@ export const LOOKS = [['roto', 0, 2, 1, 'Roto (flat tones, ink)'], ['glitch', 0,
   ['contrast', 0.5, 1.6, 0.01, 'Contrast'], ['blur', 0, 12, 0.5, 'Blur px'], ['invert', 0, 1, 0.01, 'Invert'], ['sepia', 0, 1, 0.01, 'Sepia'], ['gray', 0, 1, 0.01, 'Grayscale'], ['hueDrift', -60, 60, 1, 'Hue drift °/s'], ['hueBeat', 0, 120, 1, 'Hue kick on beat °'],
   ['brightBass', 0, 1, 0.01, 'Brightness on bass'], ['satMid', 0, 1, 0.01, 'Saturation on mids']];
 export const defaultsOf = p => Object.fromEntries(Object.entries(p.params || {}).map(([k, d]) => [k, Array.isArray(d.default) ? d.default.slice() : d.default]));
+
+// 1 track, 2 tracks
+export const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;

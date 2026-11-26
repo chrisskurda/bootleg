@@ -3,7 +3,7 @@ import { AudioFeed } from '/vendor/bootleg-vizualizer/core/audio.js';
 import { Library } from '/lib/library.js';
 import { Player } from '/lib/player.js';
 import { VizHost } from '/lib/viz.js';
-import { h } from '/lib/controls.js';
+import { h, plural } from '/lib/controls.js';
 import { MemoryBackend } from '/lib/notes.js';
 import { VirtualList } from '/lib/vlist.js';
 import { albumPane } from '/lib/album-pane.js';
@@ -63,15 +63,15 @@ function albumTracks(a) {
 }
 function albumActions(a) {
   return h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => player.playList(a.tracks, 0) }, '▶ Play album'),
-    h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${a.tracks.length} tracks`); } }, '+ Queue'));
+    h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'));
 }
-function albumHead(a) { const i = albumInfo(a); return h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover big'), h('div', {}, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, i.year, `${a.tracks.length} tracks`, i.dur ? hms(i.dur) : ''].filter(Boolean).join(' · ')), albumActions(a))); }
+function albumHead(a) { const i = albumInfo(a); return h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover big'), h('div', {}, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, i.year, plural(a.tracks.length, 'track'), i.dur ? hms(i.dur) : ''].filter(Boolean).join(' · ')), albumActions(a))); }
 function renderAlbums() {
   const mode = settings.albumView, q = $('#search').value.toLowerCase(), list = lib.albums().filter(a => !q || (a.album + ' ' + a.artist).toLowerCase().includes(q));
   $$('#albumMode button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode)); $('#albumGrid').hidden = mode !== 'grid'; $('#albumList').hidden = mode !== 'list'; $('#albumFlow').hidden = mode !== 'flow'; $('#albumSplit').hidden = mode !== 'split'; $('#emptyAlbums').hidden = list.length > 0;
   if (openKey && !list.some(a => a.key === openKey)) openKey = null;
   if (mode === 'split') { $('#albumDetail').hidden = true; renderSplit(list); return; }
-  if (mode === 'grid') { $('#albumDetail').hidden = true; if (list.length > gridLimit) { $('#albumGrid').dataset.more = '1'; } else delete $('#albumGrid').dataset.more; $('#albumGrid').replaceChildren(...list.slice(0, gridLimit).map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${a.tracks.length} tracks`)))); return; }
+  if (mode === 'grid') { $('#albumDetail').hidden = true; if (list.length > gridLimit) { $('#albumGrid').dataset.more = '1'; } else delete $('#albumGrid').dataset.more; $('#albumGrid').replaceChildren(...list.slice(0, gridLimit).map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${plural(a.tracks.length, 'track')}`)))); return; }
   if (mode === 'list') {
     if (!openKey) openKey = list[0]?.key; if (listShown !== list) { listShown = list; albumVL.setItems(list); } else albumVL.paint(true);
     const cur = list.find(x => x.key === openKey), det = $('#albumDetail'); det.hidden = !cur; if (cur) det.replaceChildren(albumHead(cur), albumTracks(cur));
@@ -129,7 +129,7 @@ let albumCount = 0;
 function renderAll() {
   const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length, vi = lib.visibleItems.length; $('#nTracks').textContent = vi || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
   if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders();
-  const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${vt} tracks · ${vr} stem sets` : '';
+  const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${plural(vt, 'track')} · ${plural(vr, 'stem set')}` : '';
   $('#forget').hidden = !scopeRoots().length;
 }
 // while tags stream in, redraw less often (each redraw of a big library is work a weaker machine can't spare)

@@ -2,6 +2,7 @@
 import { albumFacts, albumKey } from './album-details.js';
 import { MODES, STATUSES } from './libraries.js';
 import { stars } from './notes-ui.js';
+import { plural } from './controls.js';
 
 const drafts = new Map();     // unsent note text survives the pane repainting after a rating/tag change
 const SRC_LABEL = { tags: 'tags', nfo: '.nfo', server: 'server', files: 'files', library: 'library', bootleg: 'bootleg' };
@@ -17,9 +18,9 @@ export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, co
   const rated = await Promise.all(a.tracks.map(t => trackStore(t)));
 
   return h('div', { class: 'apane' },
-    h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover xl'), h('div', { class: 'agrow' }, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, facts.find(f => f.label === 'Year')?.value, `${a.tracks.length} tracks`, a.tracks.some(t => t.duration) ? hms(a.tracks.reduce((n, t) => n + (t.duration || 0), 0)) : ''].filter(Boolean).join(' · ')),
+    h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover xl'), h('div', { class: 'agrow' }, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, facts.find(f => f.label === 'Year')?.value, plural(a.tracks.length, 'track'), a.tracks.some(t => t.duration) ? hms(a.tracks.reduce((n, t) => n + (t.duration || 0), 0)) : ''].filter(Boolean).join(' · ')),
       h('div', { class: 'arate' }, stars(h, rec.rating, v => store.setRating(key, v)), mode.status ? h('select', { 'aria-label': 'Status', onchange: e => store.setStatus(key, e.target.value) }, h('option', { value: '' }, 'status…'), ...STATUSES.map(x => h('option', { value: x, selected: x === rec.status }, x))) : ''),
-      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => player.playList(a.tracks, 0) }, '▶ Play'), h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${a.tracks.length} tracks`); } }, '+ Queue')))),
+      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => player.playList(a.tracks, 0) }, '▶ Play'), h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue')))),
     h('h4', {}, 'Details ', h('span', { class: 'muted small' }, 'merged from everything we know — the chip says where each fact came from')),
     h('dl', { class: 'facts' }, ...facts.flatMap(f => [h('dt', {}, f.label), h('dd', {}, h('span', {}, f.value), h('span', { class: 'chip src' }, SRC_LABEL[f.source] || f.source))])),
     ...text.map(x => h('div', {}, h('h4', {}, x.label, ' ', h('span', { class: 'chip src' }, x.source)), h('div', { class: 'nfotext' }, x.text))),

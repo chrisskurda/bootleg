@@ -8,6 +8,27 @@ A music player for **large libraries**, with live visualizers, stem mixing, note
 - **Live visualizers** from [bootleg-vizualizer](https://github.com/chrisskurda/bootleg-vizualizer), including per-stem visuals; show them fullscreen on another display.
 - **Sources and outputs are plugins:** Subsonic/OpenSubsonic servers (Navidrome, Airsonic, Gonic) today; DLNA/UPnP casting with album art. Optional **extensions** (e.g. a Car Thing remote) sit behind a small API and are off by default.
 
+## Screenshots
+
+<p align="center"><img src="docs/screenshots/now-playing.jpg" alt="Now playing: a visualizer reacting to the music, with pack and look controls" width="860"></p>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/albums-grid.jpg" alt="Album grid"><br><sub><b>Albums</b> — grid, list, cover flow and split views</sub></td>
+<td width="50%"><img src="docs/screenshots/albums-flow.jpg" alt="Cover flow"><br><sub><b>Cover flow</b> — a 3D carousel, with the album's tracks below</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/albums-split.jpg" alt="Split view with merged details"><br><sub><b>Split view</b> — details merged from tags, <code>.nfo</code> files and the folder, each with its source; album notes and rating</sub></td>
+<td width="50%"><img src="docs/screenshots/notes.jpg" alt="Notes on the timeline"><br><sub><b>Notes</b> — ratings, tags, notes on a moment or a range (markers on the seek bar), where the recording came from</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/stems.jpg" alt="Stem mixer with the stem rack visualizer"><br><sub><b>Stem sets</b> — mute, solo and trim stems; the visualizer follows each one</sub></td>
+<td width="50%"><img src="docs/screenshots/tracks.jpg" alt="Track list"><br><sub><b>Tracks</b> — fast on big libraries; a stem set is one item with a ♫ badge</sub></td>
+</tr>
+</table>
+
+<sub>The screenshots use a synthetic demo library (fictional artists, generated art and audio): `npm run demo-library && npm run screenshots`.</sub>
+
 ## Run it
 ```
 npm install
