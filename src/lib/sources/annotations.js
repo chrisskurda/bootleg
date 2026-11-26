@@ -7,14 +7,16 @@
 // The memory is only of non-default values ({ itemId: [stars, starred] }), so it stays small for big libraries.
 export const STAR_TAG = 'starred';
 export const serverPlaylistId = (plugin, connId, id) => `srv:${plugin}:${connId}:${id}`;
-const KEY_RE = /^file:([\w-]+):([^/]+)\/(.+)#\d*$/;           // a server track's notes key: file:<plugin>:<connection>/<item id>#<size>
-const stars = r => Math.round(r || 0);
+// a server track's notes key: file:<plugin>:<connection>/<item id>#; a server stem set's: render:<plugin>:<connection>/<song id>
+const KEY_RE = /^(?:file:([\w-]+):([^/]+)\/(.+)#\d*|render:([\w-]+):([^/]+)\/([^/]+))$/;
+const parseKey = k => { const m = KEY_RE.exec(k); return m && (m[1] ? [m[1], m[2], m[3]] : [m[4], m[5], m[6]]); };
+const stars = (r, half) => (half ? Math.round((r || 0) * 2) / 2 : Math.round(r || 0));     // whole stars, unless the plugin keeps halves
 
 export class RemoteAnnotations {
   // notes: NotesStore · kv: { get(k, d), set(k, v) } · getPlugin(id) · sessionOf({ plugin, conn }) · onError(message)
   constructor({ notes, kv, getPlugin, sessionOf, onError = () => {} }) {
-    Object.assign(this, { notes, kv, getPlugin, sessionOf, onError }); this._seen = new Map();
-    notes.addEventListener('change', e => { if (typeof e.detail === 'string' && KEY_RE.test(e.detail)) this.push(e.detail).catch(err => this.onError(String(err.message || err))); });
+    Object.assign(this, { notes, kv, getPlugin, sessionOf, onError }); this._seen = new Map(); this._quiet = new Set();      // keys being written by a pull: not echoed back
+    notes.addEventListener('change', e => { if (typeof e.detail === 'string' && KEY_RE.test(e.detail) && !this._quiet.has(e.detail)) this.push(e.detail).catch(err => this.onError(String(err.message || err))); });
   }
   seen(conn) { if (!this._seen.has(conn)) this._seen.set(conn, this.kv.get('remoteSeen.' + conn, {})); return this._seen.get(conn); }
   _remember(conn, id, [r, s]) { const m = this.seen(conn); if (r || s) m[id] = [r, s]; else delete m[id]; this.kv.set('remoteSeen.' + conn, m); }
@@ -25,11 +27,14 @@ export class RemoteAnnotations {
     if (plugin.setRating || plugin.setStarred) {
       const recs = new Map((await this.notes.b.all()).filter(x => x.key.startsWith('t:')).map(x => [x.value.key, x.value])), was = this.seen(connId), push = [];
       for (const { key, item } of tracks) {
-        const rec = recs.get(key), local = [stars(rec?.rating), !!rec?.tags?.includes(STAR_TAG)], srv = [item.rating || 0, !!item.starred], prev = was[item.id] || [0, false];
+        const rec = recs.get(key), local = [stars(rec?.rating, plugin.halfStars), !!rec?.tags?.includes(STAR_TAG)], srv = [item.rating || 0, !!item.starred], prev = was[item.id] || [0, false];
         const want = [0, 1].map(i => (srv[i] !== prev[i] ? srv[i] : local[i]));        // the server changed since last time → it wins; otherwise ours
         this._remember(connId, item.id, srv);                                           // before writing locally, so our own change events see nothing to push
-        if (plugin.setRating && want[0] !== local[0]) { await this.notes.setRating(key, want[0]); out.ratings++; }
-        if (plugin.setStarred && want[1] !== local[1]) { const tags = rec?.tags || []; await this.notes.setTags(key, want[1] ? [...tags, STAR_TAG] : tags.filter(t => t !== STAR_TAG)); out.stars++; }
+        this._quiet.add(key);      // (a rating written here must not push the star before the star is written too)
+        try {
+          if (plugin.setRating && want[0] !== local[0]) { await this.notes.setRating(key, want[0]); out.ratings++; }
+          if (plugin.setStarred && want[1] !== local[1]) { const tags = rec?.tags || []; await this.notes.setTags(key, want[1] ? [...tags, STAR_TAG] : tags.filter(t => t !== STAR_TAG)); out.stars++; }
+        } finally { this._quiet.delete(key); }
         if ((plugin.setRating && want[0] !== srv[0]) || (plugin.setStarred && want[1] !== srv[1])) push.push(key);   // changed here while we were away
       }
       for (const key of push) { await this.push(key); out.pushed++; }
@@ -51,8 +56,8 @@ export class RemoteAnnotations {
   push(key) { const run = this._chain.then(() => this._push(key)); this._chain = run.catch(() => {}); return run; }
   _chain = Promise.resolve();
   async _push(key) {
-    const m = KEY_RE.exec(key); if (!m) return; const [, pid, conn, id] = m, plugin = this.getPlugin(pid), session = plugin && this.sessionOf({ plugin: pid, conn }); if (!session) return;
-    const rec = await this.notes.get(key), local = [stars(rec.rating), rec.tags.includes(STAR_TAG)], prev = [...(this.seen(conn)[id] || [0, false])];
+    const m = parseKey(key); if (!m) return; const [pid, conn, id] = m, plugin = this.getPlugin(pid), session = plugin && this.sessionOf({ plugin: pid, conn }); if (!session) return;
+    const rec = await this.notes.get(key), local = [stars(rec.rating, plugin.halfStars), rec.tags.includes(STAR_TAG)], prev = [...(this.seen(conn)[id] || [0, false])];
     if (plugin.setRating && local[0] !== prev[0]) { await plugin.setRating(session, id, local[0]); prev[0] = local[0]; }
     if (plugin.setStarred && local[1] !== prev[1]) { await plugin.setStarred(session, id, local[1]); prev[1] = local[1]; }
     this._remember(conn, id, prev);

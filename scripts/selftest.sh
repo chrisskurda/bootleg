@@ -10,6 +10,7 @@ T="$(mktemp -d)"; trap 'kill $MOCK $DLNA 2>/dev/null || true; wait $MOCK $DLNA 2
 ffmpeg -v error -y -f lavfi -i color=c=0xcc5533:s=200x200:d=1 -frames:v 1 "$T/c.png"
 ffmpeg -v error -y -f lavfi -i sine=frequency=330:duration=6 -i "$T/c.png" -map 0:a -map 1:v -c:a flac -c:v mjpeg -disposition:v attached_pic -metadata title="Self Test" -metadata artist=Tester "$T/L/A/st.flac"
 node vendor/bootleg-vizualizer/tests/make-fixture.mjs "$T/L/render" >/dev/null 2>&1
+mkdir -p "$T/P" && node --input-type=module -e "import fs from 'node:fs'; import { bstemFrom } from './tests/zipw.mjs'; const d = process.argv[1], f = {}; for (const p of ['mix.flac', 'clips.json', ...fs.readdirSync(d + '/stems').map(s => 'stems/' + s)]) f[p] = fs.readFileSync(d + '/' + p); fs.writeFileSync(process.argv[2], bstemFrom(f, { format: 'bootleg-stem', version: 2, id: '22222222-3333-4444-8555-666666666666', title: 'Packaged Self Test' }));" "$T/L/render" "$T/P/Packaged.bstem"   # a song in one file
 for i in 1 2; do ffmpeg -v error -y -f lavfi -i sine=frequency=$((300+i*100)):duration=5 "$T/S/s$i.flac"; done
 NOCORS=1 node tests/mock-subsonic-cli.mjs "$T/S" "$T/c.png" > "$T/mock.log" & MOCK=$!
 for _ in $(seq 1 30); do grep -q 'mock:' "$T/mock.log" && break; sleep 0.2; done
@@ -24,7 +25,7 @@ for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; run_timeout 150 "${RUN
 cat "$T/out.json"; echo
 node -e '
 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), skip = !!r.autoplayBlocked && !!process.env.SELFTEST_ALLOW_NO_AUTOPLAY;
-const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
+const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
 if (skip) console.log("note: autoplay is blocked on this machine; playback-dependent checks were skipped");
 if (!skip && !(r.tracks >= 1 && r.renders >= 1 && r.stems === 5 && r.peak > 0.2 && r.remoteTracks === 2 && r.remotePeak > 0.2)) bad.push("playback/stems/remote");
 const log = (require("fs").existsSync(process.argv[2]) ? require("fs").readFileSync(process.argv[2], "utf8") : "").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)), has = f => log.some(f);

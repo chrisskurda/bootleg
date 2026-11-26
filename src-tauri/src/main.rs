@@ -147,7 +147,7 @@ fn open_external(url: String) -> Result<(), String> {
 // They can arrive before the page has loaded (a cold start from Finder), so they wait here until the page takes them.
 #[derive(Default)]
 struct Opened(Mutex<Vec<String>>);
-const AUDIO_EXT: [&str; 10] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf"];
+const AUDIO_EXT: [&str; 12] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf", "bstem", "bsong"];      // and songs in one file (bootleg stem format)
 fn audio_files<I: IntoIterator<Item = PathBuf>>(paths: I) -> Vec<String> {
     paths.into_iter().filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()).is_some_and(|e| AUDIO_EXT.contains(&e.to_ascii_lowercase().as_str())))
         .filter_map(|p| p.canonicalize().ok()).map(|p| p.to_string_lossy().into_owned()).collect()

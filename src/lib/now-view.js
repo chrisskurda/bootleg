@@ -24,22 +24,25 @@ export function upNext(player, n = 5) {
   return out.map(i => ({ i, t: player.queue[i] }));
 }
 
-export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, connTitle = () => '', search = () => {}, openQueue = () => {}, spectroMode = () => 'all', heat, spectros, isShown = () => true }) {
+export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, composer = () => null, connTitle = () => '', search = () => {}, openQueue = () => {}, spectroMode = () => 'all', heat, spectros, isShown = () => true }) {
   const hero = $('#nowHero'), info = $('#nowInfo'), tl = $('#timeline'), plot = $('#tlPlot'), spec = $('#tlSpec'), heatC = $('#tlHeat'), calls = $('#tlCallouts'), ranges = $('#tlRanges'), head = $('#tlHead'), hover = $('#tlHover'), tstat = $('#tlStatus'), scale = $('#tlScale'), next = $('#upNext');
   let item = null, key = null, rec = null, tok = 0;
 
   // ---- the track
   function paintInfo() {
     const it = player.item; hero.hidden = !it; $('#nowEmpty').hidden = !!it; if (!it) return;
-    const src = it.kind === 'render' ? it.mix : it.src, r = src?.remote, size = src?.size || r?.item?.size || 0, dur = it.duration || player.dur();
+    const src = it.kind === 'render' ? it.mix || it.stems?.[0]?.src : it.src, r = src?.remote, man = it.manifest || {}, size = src?.size || r?.item?.size || 0, dur = it.duration || player.dur();
     const kbps = r?.item?.bitrate || (size && dur ? Math.round(size * 8 / dur / 1000) : 0), fmtName = (r?.item?.suffix || ext(src?.name)).toUpperCase();
     const link = (txt, q) => txt ? h('button', { class: 'link', title: 'Find in the library', onclick: () => search(q) }, txt) : '';
     const facts = [
       it.track ? ['Track', `${it.track}${it.trackTotal ? ' of ' + it.trackTotal : ''}${it.disc ? ` · disc ${it.disc}` : ''}`] : null, it.year ? ['Year', it.year] : null, it.genre ? ['Genre', it.genre] : null,
       it.albumArtist && it.albumArtist !== it.artist ? ['Album artist', it.albumArtist] : null, it.composer ? ['Composer', it.composer] : null, it.bpm ? ['BPM', String(Math.round(it.bpm))] : null, it.key ? ['Key', it.key] : null,
       dur ? ['Length', fmt(dur)] : null, fmtName || size ? ['File', [fmtName, kbps ? `${r?.item?.bitrate ? '' : '≈'}${kbps} kbps` : '', size ? mb(size) : ''].filter(Boolean).join(' · ')] : null,
-      it.kind === 'render' ? ['Stem set', `${it.stems.length} stems${it.mix ? ' + mix' : ''}`] : null,
-      ['Source', src?.kind === 'remote' ? `${connTitle(r.conn) || 'Server'}${r.item.path ? ' — ' + r.item.path : ''}` : src?.kind === 'web' ? 'Added in this browser tab' : (src?.path || it.dir || '')],
+      it.kind === 'render' ? ['Stem set', `${it.stems.length} stems${it.mix ? ' + mix' : ''}${it.pkgSrc ? (it.project ? ' · Composer song (.bsong)' : ' · .bstem') : ''}`] : null,
+      man.recipe?.style ? ['Made with', `${man.recipe.style}${man.recipe.seed != null ? ' · seed ' + man.recipe.seed : ''}`] : null,
+      man.revision ? ['Revision', `${man.revision.n ?? man.revision.rendered_from}${man.revision.rendered_from != null && man.revision.n != null && man.revision.rendered_from < man.revision.n ? ' (audio from ' + man.revision.rendered_from + ')' : ''}`] : null,
+      man.licences?.credits?.length ? ['Credits', man.licences.credits.join('; ')] : null,
+      ['Source', src?.kind === 'remote' ? `${connTitle(r.conn) || 'Server'}${r.item.path ? ' — ' + r.item.path : ''}` : src?.kind === 'pkg' ? src.pkg : src?.kind === 'web' ? 'Added in this browser tab' : (src?.path || it.dir || '')],
     ].filter(Boolean);
     const tags = rec?.tags || [], nNotes = rec?.notes?.length || 0;
     info.replaceChildren(
@@ -48,7 +51,7 @@ export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, connTit
       h('div', { class: 'nowsub' }, link(it.artist, it.artist), it.artist && it.album ? h('span', { class: 'muted' }, ' · ') : '', link(it.album, it.album), it.year ? h('span', { class: 'muted' }, ` (${it.year})`) : ''),
       tags.length || nNotes ? h('div', { class: 'nowtags' }, ...tags.map(t => h('span', { class: 'chip' }, t)), nNotes ? h('span', { class: 'chip' }, `${nNotes} note${nNotes === 1 ? '' : 's'}`) : '') : '',
       h('dl', { class: 'facts' }, ...facts.flatMap(([k, v]) => [h('dt', {}, k), h('dd', { title: v }, v)])),
-      h('div', { class: 'cbtns' }, it.kind === 'track' ? h('button', { class: 'btn', onclick: () => editTags([it]) }, '✎ Edit tags') : '', it.lyrics ? h('details', { class: 'lyrics' }, h('summary', { class: 'link' }, 'Lyrics'), h('div', {}, it.lyrics)) : ''));
+      h('div', { class: 'cbtns' }, it.kind === 'track' ? h('button', { class: 'btn', onclick: () => editTags([it]) }, '✎ Edit tags') : '', composer(it) ? h('button', { class: 'btn', id: 'openComposer', onclick: composer(it) }, '♫ Open in Composer') : '', it.lyrics ? h('details', { class: 'lyrics' }, h('summary', { class: 'link' }, 'Lyrics'), h('div', {}, it.lyrics)) : ''));
     const c = $('#nowCover'); c.replaceChildren(it.coverUrl ? h('img', { src: it.coverUrl, alt: '' }) : h('div', { class: 'cover ph' }, '♪'));
   }
 

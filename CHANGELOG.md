@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
+### Added
+- **bootleg stem server** as a library source (*Settings → Connect → bootleg stem server*): its songs appear as stem sets — mix first, stems on demand — with their cover, tempo, key and sections; grades sync both ways with bootleg's ratings (A+ … F ↔ 5 … ½ stars, half stars kept), favourites with the `starred` tag, and the server's playlists appear in Playlists. MusicGen's audition server (API v1) works too while you move over, with the same song ids, so notes follow a song when its render folder becomes a package.
+- **Songs in one file**: `.bstem` (a song and its stems) and `.bsong` (a bootleg Composer song) play as stem sets straight from the file — the mix at once, the stems on demand, read in place. bootleg opens them from Finder/Explorer too (`.bstem` by default, `.bsong` as an alternative to Composer).
+- Now playing shows a song's recipe (style, seed), revision and the credits its licences ask for, and offers **Open in Composer** for a stem server song.
+
+### Fixed
+- Syncing a server's ratings and stars no longer echoes them back: a song that was rated and starred on the server was briefly un-starred there while bootleg caught up.
+
 ## [0.3.1] - 2026-11-25
 
 ### Fixed
@@ -74,7 +84,8 @@ First release: a music player for large libraries, with stem mixing, notes and l
 ### Fixed
 - Playback no longer waits for a stream to finish loading before starting, falls back to downloading the file when a stream is blocked or stalls, and shows a message saying why a track can't play instead of failing silently.
 
-[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/chrisskurda/bootleg/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/chrisskurda/bootleg/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/chrisskurda/bootleg/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chrisskurda/bootleg/compare/v0.1.0...v0.2.0

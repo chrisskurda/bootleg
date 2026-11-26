@@ -1,7 +1,8 @@
 // The library: plain tracks and stem renders, found in the sources you add. Tags are read in the background,
 // remembered in a persistent cache (validated by size + mtime), and .nfo files in the folders add/fill metadata.
 import { readTags } from './tags.js';
-import { AUDIO_RE, NFO_RE } from './source.js';
+import { AUDIO_RE, NFO_RE, PKG_RE } from './source.js';
+import { openPackage } from './stempkg.js';
 import { NullCache } from './cache.js';
 import { parseNfo } from './nfo.js';
 
@@ -82,11 +83,17 @@ export class Library extends EventTarget {
     const mixIn = dir => { for (const f of byDir.get(dir) || []) if (isMixName(f.name)) return f; return null; };
     const make = (dir, stems, manifest, clips, mix, loose) => {
       const name = dir.split('/').pop() || 'Render', parent = dir.split('/').slice(-2, -1)[0] || '';
-      const r = { id: 'r' + (++this._n), kind: 'render', dir, src: manifest || stems[0], manifestSrc: manifest || null, loose, title: /^(gm|render|out|output|stems?|mix)$/i.test(name) && parent ? parent : name, artist: '', album: '', year: '', genre: '', track: 0, disc: 0, tagged: true, nfo: null,
+      const cover = ['jpg', 'jpeg', 'png', 'webp'].map(x => idx.get(dir + '/cover.' + x)).find(Boolean) || null;
+      const r = { id: 'r' + (++this._n), kind: 'render', dir, src: manifest || stems[0], manifestSrc: manifest || null, coverSrc: cover, loose, title: /^(gm|render|out|output|stems?|mix)$/i.test(name) && parent ? parent : name, artist: '', album: '', year: '', genre: '', track: 0, disc: 0, tagged: true, nfo: null,
         stems: stems.slice().sort((a, b) => a.name.localeCompare(b.name)).map(x => ({ name: stem(x.name), src: x })), clips: null, manifest: null, mix: mix || null, clipsSrc: clips || null, libs: new Set([libId]), bpm: undefined, key: '', duration: undefined, sections: [], coverUrl: null };
       this.renders.push(r); this._byPath.set(r.src.path, r); this._enqueue(() => this._loadRender(r));
       if (loose) { stems.forEach(x => renderFiles.add(x.path)); if (mix) renderFiles.add(mix.path); } else renderDirs.push(dir);
     };
+    for (const s of fresh) if (PKG_RE.test(s.name) && s.reader) {                       // 0. .bstem / .bsong packages: one song each (opened in _loadRender)
+      const r = { id: 'r' + (++this._n), kind: 'render', dir: s.path, src: s, pkgSrc: s, manifestSrc: null, coverSrc: null, loose: false, title: s.name.replace(PKG_RE, ''), artist: '', album: '', year: '', genre: '', track: 0, disc: 0, tagged: true, nfo: null,
+        stems: [], clips: null, manifest: null, mix: null, clipsSrc: null, libs: new Set([libId]), bpm: undefined, key: '', duration: undefined, sections: [], coverUrl: null, project: /\.bsong$/i.test(s.name) };
+      this.renders.push(r); this._byPath.set(s.path, r); this._enqueue(() => this._loadRender(r)); renderFiles.add(s.path);
+    }
     for (const [d, files] of byDir) {                                                    // 1. stems/ folders
       if (!d.endsWith('/stems')) continue; const dir = d.slice(0, -6), manifest = idx.get(dir + '/manifest.json');
       if (files.length >= 2 || manifest) { make(dir, files, manifest, idx.get(dir + '/clips.json'), mixIn(dir), false); claimed.add(d); claimed.add(dir); }
@@ -130,14 +137,24 @@ export class Library extends EventTarget {
   // Light metadata only (manifest + the mix's tags), cached like a track's tags. The heavy parts — clips.json and the stems'
   // audio — are loaded when the render is played (see loadClips and the player).
   async _loadRender(r) {
+    if (r.pkgSrc && !r.pkg) {                                                    // a package: its directory is read every time (cheap: the end of the file), so its parts can play
+      try {
+        const p = r.pkg = await openPackage(r.pkgSrc); r.mix = p.mix ? p.sourceFor(p.mix) : null; r.stems = p.stems.map(x => ({ name: stem(x.split('/').pop()), src: p.sourceFor(x) }));
+        r.clipsSrc = p.clips ? p.sourceFor(p.clips) : null; r.coverSrc = p.cover ? p.sourceFor(p.cover) : null; r.manifestSrc = { text: async () => JSON.stringify(p.manifest) }; r.songId = p.manifest.id || null;
+        if (r.coverSrc) r.coverUrl = await r.coverSrc.urlAsync();
+      } catch (e) { r.broken = String(e.message || e); }
+      this._changed();
+    }
     const rec = this.fileCache.get(r.src.path);
-    if (rec && rec.kind === 'render' && same(rec, r.src)) { Object.assign(r, rec.data.meta); r.manifest = rec.data.manifest || {}; r.coverUrl = rec.data.coverKey ? this._covers.get(rec.data.coverKey) || null : null; this.stats.cached++; return; }
+    if (rec && rec.kind === 'render' && same(rec, r.src)) { Object.assign(r, rec.data.meta); r.manifest = rec.data.manifest || {}; r.coverUrl = rec.data.coverKey ? this._covers.get(rec.data.coverKey) || null : r.coverUrl || (r.coverSrc ? r.coverSrc.url() : null); this.stats.cached++; return; }
     try { r.manifest = r.manifestSrc ? JSON.parse(await r.manifestSrc.text()) : {}; } catch { r.manifest = {}; }
     const m = r.manifest; r.bpm = m.bpm; r.key = m.key_label || m.key || ''; r.duration = m.seconds; r.sections = (m.sections || []).map(x => ({ name: x.name, start: x.start_s ?? x.start, end: x.end_s ?? x.end })); if (m.title || m.name) r.title = m.title || m.name;
     let coverKey = null;
-    if (r.mix) { try { const g = await this._tagsOf(r.mix); const c = g.cover ? await this._coverFrom(g.cover) : g.coverKey && this._covers.has(g.coverKey) ? { key: g.coverKey, url: this._covers.get(g.coverKey) } : { key: null, url: null }; r.coverUrl = c.url; coverKey = c.key;
+    if (r.mix && r.mix.reader) { try { const g = await this._tagsOf(r.mix); const c = g.cover ? await this._coverFrom(g.cover) : g.coverKey && this._covers.has(g.coverKey) ? { key: g.coverKey, url: this._covers.get(g.coverKey) } : { key: null, url: null }; r.coverUrl = c.url; coverKey = c.key;
       if (g.title) r.title = g.title; if (g.artist) r.artist = g.artist; if (g.album) r.album = g.album; if (g.year) r.year = g.year; if (g.genre) r.genre = g.genre; if (g.duration && !r.duration) r.duration = g.duration; } catch { /* a mix without readable tags is fine */ } }
-    this._remember({ path: r.src.path, size: r.src.size, mtime: r.src.mtime || 0, kind: 'render', data: { meta: { title: r.title, artist: r.artist, album: r.album, year: r.year, genre: r.genre, bpm: r.bpm, key: r.key, duration: r.duration, sections: r.sections }, manifest: r.manifest, coverKey } });
+    if (!r.coverUrl && r.coverSrc) r.coverUrl = r.coverSrc.urlAsync ? await r.coverSrc.urlAsync() : r.coverSrc.url();          // a song's own picture (packages and stem server songs carry cover.*)
+    if (m.artist && !r.artist) r.artist = m.artist; if (m.album && !r.album) r.album = m.album;
+    this._remember({ path: r.src.path, size: r.src.size, mtime: r.src.mtime || 0, kind: 'render', data: { meta: { title: r.title, artist: r.artist, album: r.album, year: r.year, genre: r.genre, bpm: r.bpm, key: r.key, duration: r.duration, sections: r.sections, ...(r.coverSrc && !coverKey && !r.pkgSrc ? { coverUrl: r.coverUrl } : {}) }, manifest: r.manifest, coverKey } });
   }
   async loadClips(r) { if (r.clips || !r.clipsSrc) return r.clips; try { r.clips = JSON.parse(await r.clipsSrc.text()); } catch { r.clips = null; } return r.clips; }
 

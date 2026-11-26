@@ -10,7 +10,7 @@ export class StemDeck {
   }
   async load(render, onProgress) {
     const id = ++this._id; this.dispose(); const gains = (render.manifest && render.manifest.stems_gain_db) || {}; let n = 0;
-    const decoded = await pool(render.stems, 3, async s => { if (id !== this._id) return null; const ab = await (await fetch(s.src.url())).arrayBuffer(); const buf = await this.ctx.decodeAudioData(ab); onProgress?.(++n, render.stems.length); return { name: s.name, buf }; });
+    const decoded = await pool(render.stems, 3, async s => { if (id !== this._id) return null; const res = await (s.src.fetch ? s.src.fetch() : fetch(s.src.url())); if (!res.ok) throw new Error(`${s.name}: HTTP ${res.status}`); const ab = await res.arrayBuffer(); const buf = await this.ctx.decodeAudioData(ab); onProgress?.(++n, render.stems.length); return { name: s.name, buf }; });
     if (id !== this._id) return false;                                         // the user picked something else while this loaded
     this.stems = decoded.map(({ name, buf }) => {
       const baseDb = gains[name] ?? 0, tap = this.ctx.createGain(), fader = this.ctx.createGain(), role = window.VisStems.roleOf(name);

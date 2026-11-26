@@ -98,7 +98,9 @@ export class Player extends EventTarget {
   // HTTP plugin can) and play it from a blob: URL. This never blocks playback from starting: the element is tried first, at once.
   async _setSrc(src) {
     const a = this.audio, tok = ++this._tok, cur = this.item; if (this._blob) { URL.revokeObjectURL(this._blob); this._blob = null; }
-    clearTimeout(this._dog); a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
+    clearTimeout(this._dog);
+    if (src.urlAsync) { try { const u = await src.urlAsync(); if (tok === this._tok) a.src = u; } catch (e) { this._fail(`Could not play “${cur?.title || src.name}”: ${e.message || e}`); } return; }      // a part of a .bstem/.bsong package
+    a.src = src.url(); if (src.kind !== 'tauri' && src.kind !== 'remote') return;
     const fallback = async why => {
       if (tok !== this._tok || this._blob || this.item !== cur) return;
       try { const r = await (src.fetch ? src.fetch() : fetch(src.url())); if (!r.ok) throw new Error('HTTP ' + r.status); this._blob = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: mimeOf(r, src.name) })); if (tok === this._tok) { a.src = this._blob; if (this._wantPlay) a.play().catch(() => {}); } }

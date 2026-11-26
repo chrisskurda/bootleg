@@ -4,7 +4,8 @@ import { blobReader } from './tags.js';
 const norm = p => String(p).replace(/\\/g, '/');
 export const AUDIO_RE = /\.(mp3|flac|m4a|aac|ogg|opus|wav|aif|aiff|caf)$/i;
 export const NFO_RE = /\.nfo$/i;
-export const wanted = name => AUDIO_RE.test(name) || NFO_RE.test(name) || name === 'manifest.json' || name === 'clips.json';
+export const PKG_RE = /\.(bstem|bsong)$/i;      // a whole song in one file (lib/stempkg.js)
+export const wanted = name => AUDIO_RE.test(name) || NFO_RE.test(name) || PKG_RE.test(name) || name === 'manifest.json' || name === 'clips.json';
 
 export function webSource(file, path) {
   let url = null;

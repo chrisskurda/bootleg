@@ -1,6 +1,6 @@
 # Writing a library source plugin
 
-A *source plugin* lets a bootleg library list and stream music that isn't a folder of files — a Subsonic server today; a YouTube Music, Spotify, Bandcamp or Jellyfin plugin tomorrow. **`src/lib/sources/subsonic.js` is the reference implementation: copy it.** The contract is documented at the top of `src/lib/sources/plugin.js`.
+A *source plugin* lets a bootleg library list and stream music that isn't a folder of files — a Subsonic server and a bootleg stem server today; a YouTube Music, Spotify, Bandcamp or Jellyfin plugin tomorrow. **`src/lib/sources/subsonic.js` is the reference implementation: copy it.** The contract is documented at the top of `src/lib/sources/plugin.js`.
 
 ## The contract
 ```js
@@ -16,8 +16,17 @@ export const myService = {
   playlists(session) → [{ id, name, owner, items: [itemId] }],  // optional: copies shown in Playlists, refreshed each sync
   setRating(session, itemId, stars),           // optional: whole stars 0–5; bootleg ratings then sync both ways
   setStarred(session, itemId, on),             // optional: the server's star/favourite ↔ the bootleg tag "starred"
+  halfStars: true,                             // optional: the service keeps half stars (setRating gets 3.5; otherwise whole stars)
 };
 // Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate }
+//   or a file item: { id, kind: 'file', rel: '<song>/stems/kick.flac', size, changed, text?, song? }
+```
+**File items** are plain files laid out like a folder (`rel`): the library finds stem sets among them exactly as it does
+on disk (a `stems/` folder, a `mix.*`, `manifest.json`, `clips.json`, `cover.*` beside it). `text` gives a file's content
+inline (a manifest in the listing saves a request per song). On the manifest's item, `song: { id, rating, starred }`
+lets the stem set's rating and the `starred` tag sync like a track's (`setRating(session, song.id, …)`). The stem server
+plugin (`src/lib/sources/stemserver.js`) works this way.
+```js
 ```
 Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's all: the app then offers it under *Settings → library → Connect a server or service…*.
 
@@ -35,7 +44,7 @@ Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's 
 - **DRM'd / streaming-only services** (Spotify, YouTube Music): they usually forbid raw audio access. A plugin can still list the library, show metadata and cover art, and hand off playback to the service's own player — extend `streamUrl` into a `play(session, item)` hook when the first such plugin is written; the library, notes, ratings and playlists layers already work without audio access.
 
 ## Testing
-`tests/mock-subsonic.mjs` is a small in-process Subsonic server (with and without CORS) used by `tests/app.test.mjs` and the desktop self-tests (`BOOTLEG_SELFTEST_SUBSONIC`). Do the same for your service: a mock, then drive connect → scan → play → restart → rescan.
+`tests/mock-subsonic.mjs` is a small in-process Subsonic server (and `tests/mock-stemserver.mjs` a stem server) (with and without CORS) used by `tests/app.test.mjs` and the desktop self-tests (`BOOTLEG_SELFTEST_SUBSONIC`). Do the same for your service: a mock, then drive connect → scan → play → restart → rescan.
 
 ---
 

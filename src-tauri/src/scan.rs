@@ -17,7 +17,7 @@ pub struct Progress { pub dirs: usize, pub files: usize }
 const AUDIO: [&str; 10] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf"];
 fn wanted(name: &str) -> bool {
     if name == "manifest.json" || name == "clips.json" { return true; }
-    match name.rsplit_once('.') { Some((_, e)) => { let e = e.to_ascii_lowercase(); e == "nfo" || AUDIO.contains(&e.as_str()) } None => false }
+    match name.rsplit_once('.') { Some((_, e)) => { let e = e.to_ascii_lowercase(); e == "nfo" || e == "bstem" || e == "bsong" || AUDIO.contains(&e.as_str()) } None => false }
 }
 
 pub fn scan(root: &Path, mut on_progress: impl FnMut(Progress) + Send) -> Vec<Entry> {

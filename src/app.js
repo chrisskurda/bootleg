@@ -218,7 +218,7 @@ async function addFolderDesktop() {
   libs.addRoot(libs.target().id, dir); const srcs = await scanFolder(dir); await addSources(srcs, 'Scanned'); cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))).catch(() => {});
 }
 async function addFilesDesktop() {
-  const picked = await TAURI.dialog.open({ multiple: true, title: 'Add music files', filters: [{ name: 'Audio', extensions: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'aif', 'aiff', 'caf'] }] }); if (!picked) return;
+  const picked = await TAURI.dialog.open({ multiple: true, title: 'Add music files', filters: [{ name: 'Audio and songs', extensions: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'aif', 'aiff', 'caf', 'bstem', 'bsong'] }] }); if (!picked) return;
   await addSources(await sourcesFromPathsTauri(Array.isArray(picked) ? picked : [picked]));
 }
 $('#addFolder').onclick = () => (TAURI ? addFolderDesktop().catch(e => toast(String(e), true)) : $('#folderIn').click());
@@ -256,7 +256,7 @@ async function syncConnection(conn, L) {
   try {
     const ses = p.session(conn.config), srcs = await scanConnection(p, ses, conn.id, { onProgress: t => { scan.text = t; } }); const before = lib.tracks.length; lib.add(srcs, L.id); const removed = lib.removeMissing(key, new Set(srcs.map(x => x.path)), L.id); await cache.putIndex(key, srcs.map(toIndexEntry));
     // ratings, stars and playlists the server keeps (a failure here never fails the scan itself)
-    scan.text = 'Syncing ratings and playlists…'; const tracks = srcs.map(x => { const t = lib._byPath.get(x.path); return t?.kind === 'track' ? { key: trackKey(t), item: x.remote.item } : null; }).filter(Boolean);
+    scan.text = 'Syncing ratings and playlists…'; const tracks = srcs.map(x => { const t = lib._byPath.get(x.path); return t?.kind === 'track' ? { key: trackKey(t), item: x.remote.item } : t?.kind === 'render' && x.remote.item.song ? { key: trackKey(t), item: x.remote.item.song } : null; }).filter(Boolean);      // a server's stem sets: their song carries the grade
     try { await remoteAnn.pull(p, conn.id, ses, tracks); } catch (e) { toast(`${conn.title}: could not sync ratings/playlists (${e.message || e})`, true); }
     await tagFiles?.prune().catch(() => {});      // edits the server now agrees with (it re-read files bootleg wrote) are no longer needed
     return { added: Math.max(0, lib.tracks.length - before), removed, total: srcs.length };
@@ -295,7 +295,8 @@ if (TAURI?.event) TAURI.event.listen('tauri://drag-drop', async ev => {
 async function openFromOS() {
   const paths = await TAURI.core.invoke('take_opened'); if (!paths.length) return;
   lib.add(await sourcesFromPathsTauri(paths), libs.target().id);
-  const items = paths.map(p => { const t = lib._byPath.get(p); return t && t.kind === 'track' ? t : lib.renders.find(r => r.mix?.path === p); }).filter(Boolean);
+  const items = paths.map(p => { const t = lib._byPath.get(p); return t && t.kind === 'track' ? t : lib.renders.find(r => r.mix?.path === p || r.pkgSrc?.path === p); }).filter(Boolean);
+  for (let i = 0; i < 100 && items.some(r => r.pkgSrc && !r.pkg && !r.broken); i++) await new Promise(ok => setTimeout(ok, 50));      // a package's parts are read first
   if (items.length) { await acts.now(items); renderAll(); } else toast('bootleg could not open that file', true);
 }
 if (TAURI?.event && !SELF) TAURI.event.listen('bootleg://opened', () => openFromOS().catch(e => toast(String(e), true)));
@@ -555,6 +556,10 @@ const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, li
 let nowKV; try { nowKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV(); } catch { nowKV = new MapKV(); }
 const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fmt, $, editTags, heat: new ListenHeat(nowKV), spectros: new SpectroCache(nowKV), isShown: () => view === 'now',
   connTitle: id => libs.allConnections().find(c => c.conn.id === id)?.conn.title || '', spectroMode: () => settings.spectro,
+  composer: it => {      // a stem server song: ask Composer to open it (Composer watches the server for these requests)
+    const rm = it?.kind === 'render' && (it.mix || it.stems?.[0]?.src)?.remote, p = rm && getSource(rm.plugin); if (!p?.openInComposer) return null; const ses = sessionOf({ plugin: rm.plugin, conn: rm.conn }), id = it.dir.split('/').pop();
+    return () => p.openInComposer(ses, id).then(() => toast('Sent to Composer — it opens there'), e => toast(String(e.message || e), true));
+  },
   search: q => { $('#search').value = q; show('tracks'); $('#search').oninput(); }, openQueue: () => { if ($('#queue').hidden) $('#qToggle').click(); } });
 // a server's ratings, stars and playlists ↔ bootleg (Subsonic/Navidrome); pushes go out as you rate
 // tag edits → the library (on start, on every change, and after a notes import)
@@ -611,6 +616,12 @@ async function selfTest(dir) {
       await TAURI.core.invoke('selftest_minimize', { on: true }); try { await wait(() => mini.alive, 8000); out.miniOnMinimize = true; } catch { await TAURI.core.invoke('mini_open'); await wait(() => mini.alive, 12000); }
       out.miniWindow = true; mini.cmd({ cmd: 'volume', to: 0.5 }); await TAURI.core.invoke('selftest_minimize', { on: false }); if (!out.miniOnMinimize) await TAURI.core.invoke('mini_close'); await wait(() => !mini.alive, 12000); out.miniClosed = true;
     } catch (e) { out.miniDiag = String(e?.message || e); }
+    // a .bstem: its parts are read by range from the file (the asset protocol), its mix plays, its stems load
+    try {
+      const pdir = dir.replace(/\/[^/]+$/, '/P'); lib.add(await scanFolder(pdir)); const r = lib.renders.find(x => x.pkgSrc); await wait(() => r && (r.pkg || r.broken), 10000);
+      if (r.broken) throw new Error(r.broken); await player.playList([r], 0); await wait(() => player.playing && player.pos() > 0.3, 15000);
+      await player.ensureStems(); await wait(() => player.mode === 'deck' && player.deck.stems.length === r.stems.length, 20000); out.package = r.title === 'Packaged Self Test' && r.stems.length >= 2; player.pause();
+    } catch (e) { out.packageDiag = String(e?.message || e); }
     // the startup path itself (cache, then the background check) runs to the end on the desktop
     out.startup = await Promise.race([startLibrary().then(() => true, e => 'error: ' + (e?.message || e)), new Promise(r => setTimeout(() => r('timeout'), 30000))]);
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);

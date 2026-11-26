@@ -1,6 +1,8 @@
 // End-to-end: build the app, serve it, drive it in Chrome with real files (tagged flac/mp3/m4a with covers + a stem render folder).
 //   node tests/app.test.mjs [--shots DIR]
 import { startMock } from './mock-subsonic.mjs';
+import { startStemServer } from './mock-stemserver.mjs';
+import { bstemFrom } from './zipw.mjs';
 import { chromium } from 'playwright-core'; import { spawn, spawnSync } from 'node:child_process'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), si = process.argv.indexOf('--shots'), shots = si > 0 ? path.resolve(process.argv[si + 1]) : null; if (shots) fs.mkdirSync(shots, { recursive: true });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootleg-e2e-')), lib = path.join(tmp, 'Library'), PORT = 8700 + Math.floor(Math.random() * 90);
@@ -360,6 +362,38 @@ try {
   t('when a server track cannot be played, the user is told why (never silent)', /Could not play .*Fresh Upload/.test(await pg.locator('.toast.bad').first().innerText()), await pg.locator('.toast.bad').first().innerText());
   mock.state.failStream = false;
   mock.close();
+  // ---- a song in one file (.bstem), and songs from a bootleg stem server
+  const fxDir = path.join(lib, 'Renders/fixture-render'), fxStems = fs.readdirSync(path.join(fxDir, 'stems')).filter(f => f.endsWith('.flac')), fxFiles = {};
+  for (const f of ['mix.flac', 'clips.json', ...fxStems.map(x => 'stems/' + x)]) fxFiles[f] = fs.readFileSync(path.join(fxDir, f));
+  const pkgDir = path.join(tmp, 'Packages'); fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(path.join(pkgDir, 'Packaged.bstem'), bstemFrom(fxFiles, { format: 'bootleg-stem', version: 2, id: '11111111-2222-4333-8444-555555555555', title: 'Packaged Song', bpm: 120 }));
+  await pg.click('.nav[data-view="tracks"]'); await pg.setInputFiles('#folderIn', pkgDir);
+  await pg.waitForFunction(n => window.__bootleg.lib.renders.some(r => r.title === 'Packaged Song' && r.stems.length === n && r.mix), fxStems.length, { timeout: 15000 });
+  t('a .bstem is one stem set: its title from the manifest, its mix and stems from inside the file', (await ev(() => window.__bootleg.lib.renders.find(r => r.title === 'Packaged Song').bpm)) === 120);
+  await ev(async () => { const B = window.__bootleg; await B.player.playList([B.lib.renders.find(r => r.title === 'Packaged Song')], 0); });
+  await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3, null, { timeout: 15000 }); t('…its mix plays straight from the package', true);
+  await ev(() => window.__bootleg.player.ensureStems()); await pg.waitForFunction(n => window.__bootleg.player.mode === 'deck' && window.__bootleg.player.deck.stems.length === n, fxStems.length, { timeout: 30000 });
+  t('…and its stems load from it into the stem mixer', true);
+  const songId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', fxMan = JSON.parse(fs.readFileSync(path.join(fxDir, 'manifest.json'), 'utf8'));
+  const ss = await startStemServer({ songs: [{ id: songId, name: 'out_collage_test', dir: fxDir, manifest: { ...fxMan, id: songId, title: 'Server Song', bpm: 132 }, annotations: { grade: 'A-', rating: 4, fav: true } }], playlists: [{ name: 'Server Set', items: [songId] }] });
+  await pg.click('.nav[data-view="settings"]'); await pg.fill('#newLibName', 'Stems'); await pg.click('#newLibBtn'); const sid2 = await ev(() => window.__bootleg.libs.active); await pg.click('#connectOpen-' + sid2);
+  await pg.selectOption('.connect select', 'stemserver'); await pg.fill('input[name=url]', ss.url); await pg.click('.connect .btn.primary');
+  await pg.waitForFunction(() => window.__bootleg.lib.renders.some(r => r.title === 'Server Song' && r.mix), null, { timeout: 20000 });
+  const ssr = await ev(() => { const r = window.__bootleg.lib.renders.find(x => x.title === "Server Song"); return { stems: r.stems.length, bpm: r.bpm, dir: r.dir }; });
+  t('a stem server song is a stem set: manifest, mix and stems, keyed by its permanent id', ssr.stems === fxStems.length && ssr.bpm === 132 && ssr.dir.endsWith("/" + songId), JSON.stringify(ssr));
+  const skey2 = "render:" + ssr.dir, recOf = k => pg.evaluate(async kk => window.__bootleg.notes.store.get(kk), k);
+  for (let i = 0; i < 100 && (await recOf(skey2)).rating !== 4; i++) await sleep(100);
+  const r0 = await recOf(skey2); t('its grade arrives as a rating (A- = 4 stars), its favourite as the "starred" tag', r0.rating === 4 && r0.tags.includes('starred'), JSON.stringify([r0.rating, r0.tags]));
+  await pg.evaluate(k => window.__bootleg.notes.store.setRating(k, 3.5), skey2);
+  for (let i = 0; i < 50 && !ss.state.writes.some(w => w[1].rating === 3.5); i++) await sleep(100);
+  t('rating it in bootleg sets its grade on the server — half stars too — and pulling the server\'s values never echoes them back', JSON.stringify(ss.state.writes) === JSON.stringify([[songId, { rating: 3.5 }]]), JSON.stringify(ss.state.writes));
+  t('the server\'s playlists arrive with its songs', await pg.evaluate(async k => (await window.__bootleg.notes.store.playlists()).some(p => p.name === 'Server Set' && p.items[0] === k), skey2));
+  await ev(async () => { const B = window.__bootleg; await B.player.playList([B.lib.renders.find(r => r.title === 'Server Song')], 0); B.player.ensureStems(); });
+  await pg.waitForFunction(n => window.__bootleg.player.mode === 'deck' && window.__bootleg.player.deck.stems.length === n && window.__bootleg.player.playing, fxStems.length, { timeout: 30000 });
+  t('it plays, and its stems load from the server', true);
+  await pg.click('.nav[data-view="now"]'); await pg.waitForSelector('#openComposer'); await pg.click('#openComposer'); for (let i = 0; i < 30 && !ss.state.opens.length; i++) await sleep(100);
+  t('Now playing offers "Open in Composer" for a server song, and asks the server to hand it over', ss.state.opens[0]?.song === songId && ss.state.opens[0]?.app === 'composer');
+  ss.close();
   const realErrs = errs.filter(e => !/status of 500.*stream\.view/.test(e));      // the deliberate failing stream above
   t('no console or page errors', realErrs.length === 0, realErrs.slice(0, 3).join(' | '));
 } catch (e) { t('test run completed without throwing', false, String(e.message).split('\n')[0]); if (shots) await pg.screenshot({ path: path.join(shots, 'failure.png') }).catch(() => {}); }
