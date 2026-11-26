@@ -101,6 +101,7 @@ Decided 2026-11-26. Sync the library to portable players: USB-storage players, S
 - **Modes:** `add` (copy in, never delete), `mirror` (the managed folder matches the selection), `fill` (fill up to a space budget, rotating). In every mode only files in bootleg's manifest are ever replaced or deleted.
 - **Device handlers** (plugin spec 2.0 §6.1): `generic`, `rockbox` and `pod` are built in. Stem renders go as mix + metadata unless stems are chosen.
 - **Order:** bootleg-pod's `bootleg-sync` crate and CLI first, then the desktop sync view on top of it, then the Rockbox play-count import, then two-way notes with pod devices.
+- **Built (unreleased):** `vendor/bootleg-sync` (git subtree from bootleg-pod's `crates/bootleg-sync`; change it there and `git subtree pull --prefix=vendor/bootleg-sync <bootleg-pod> <split branch> --squash`), `src-tauri/src/devices.rs` (commands), `src/lib/devices.js` (selection → files, outbox merge; `tests/devices.test.mjs`), `src/lib/devices-ui.js` (the Devices page), and a `deviceSync` step in the desktop self-test. The card's selection (`playlists`, `[select] min_rating / starred`) lives in its `device.toml`, so it travels with the card. Next: transcoding (the core `Transcode`), USB vendor/product ids for players without bootleg-pod, `.bstem` packages as mix + metadata, Windows free space.
 
 ### Roadmap: iPod plugin (experimental, no guarantees)
 A separate plugin, not part of the supported player sync and not in the default build. Needs plugin spec 2.1 (helper processes, `stability: experimental`).

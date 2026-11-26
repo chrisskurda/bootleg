@@ -21,6 +21,8 @@ tiny_http = "0.12"
 base64 = "0.22"
 lofty = "0.22"
 ureq = { version = "2", default-features = false }
+bootleg-sync = { path = "../vendor/bootleg-sync" }
+toml = "1"
 
 [profile.release]
 opt-level = "s"

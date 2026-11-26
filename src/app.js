@@ -29,6 +29,8 @@ import { ListenHeat, SpectroCache, IdbKV, MapKV } from '/lib/listen-heat.js';
 import { MiniHost } from '/lib/mini-host.js';
 import { SHARE_DEFAULTS } from '/lib/share.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
+import { initDevices } from '/lib/devices-ui.js';
+import { filesFor } from '/lib/devices.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -43,7 +45,7 @@ const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
 // ------------------------------------------------------------------ views
-let view = 'tracks';
+let view = 'tracks', devices = null;      // devices: the Devices page (set up once the notes store exists)
 // The visualizer stage sits over the Now playing tile or the Visualizer page, or floats as a mini player elsewhere (viz-dock.js).
 const vizDock = new VizDock({ stage: $('#vizStage'), area: $('#main'), onChange: () => syncViz() });
 // analysing while the stage shows, and on Now playing even with the tile scrolled away (the stem meters use the same analysis)
@@ -57,7 +59,7 @@ function placeViz() {
 function setDrawer(open) { $('#vizDrawer').hidden = !open; $('#vizStage').classList.toggle('drawer', open); $('#vizGear').classList.toggle('on', open); }
 function show(v) {
   view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v)); placeViz();
-  syncViz(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } extViews.get(v)?.shown?.(); renderAll();
+  syncViz(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } extViews.get(v)?.shown?.(); if (v === 'devices') devices?.shown(); renderAll();
 }
 const navClick = b => { b.onclick = () => show(b.dataset.view); }; $$('.nav').forEach(navClick); $('#np').onclick = () => show('now');
 $('#vizGear').onclick = () => setDrawer($('#vizDrawer').hidden); $('#drawerClose').onclick = () => setDrawer(false);
@@ -563,6 +565,7 @@ async function saveText(name, text, mime, fullPath) {
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
 const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: (ts, i = 0) => acts.now(ts, i), shareOpts: () => settings });
+devices = initDevices({ root: $('#view-devices'), h, lib, notes: notes.store, keyOf: trackKey, toast, store, plural });     // players and SD cards (desktop)
 let nowKV; try { nowKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV(); } catch { nowKV = new MapKV(); }
 const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fmt, $, editTags, heat: new ListenHeat(nowKV), spectros: new SpectroCache(nowKV), isShown: () => view === 'now',
   connTitle: id => libs.allConnections().find(c => c.conn.id === id)?.conn.title || '', spectroMode: () => settings.spectro,
@@ -632,6 +635,18 @@ async function selfTest(dir) {
       if (r.broken) throw new Error(r.broken); await player.playList([r], 0); await wait(() => player.playing && player.pos() > 0.3, 15000);
       await player.ensureStems(); await wait(() => player.mode === 'deck' && player.deck.stems.length === r.stems.length, 20000); out.package = r.title === 'Packaged Self Test' && r.stems.length >= 2; player.pause();
     } catch (e) { out.packageDiag = String(e?.message || e); }
+    // syncing to a player: pair a card folder that already holds a file of the user's, mirror one track and a playlist onto it,
+    // then mirror nothing — bootleg's copy goes, the user's file stays (the shell checks the files on disk afterwards)
+    try {
+      const card = dir.replace(/\/[^/]+$/, '/card'), inv = TAURI.core.invoke, lt = lib.tracks.find(x => x.src.kind === 'tauri');
+      await inv('device_pair', { volume: card, name: 'Self-test card', mode: 'mirror', root: 'Music/bootleg', kind: null });
+      const { files } = filesFor([lt], { keyOf: trackKey }), p1 = await inv('device_plan', { volume: card, items: files, playlists: [{ name: 'Road', tracks: [trackKey(lt)] }] });
+      const r1 = await inv('device_apply', { planId: p1.id, onProgress: new TAURI.core.Channel() });
+      const again = await inv('device_plan', { volume: card, items: files, playlists: [{ name: 'Road', tracks: [trackKey(lt)] }] });
+      out.deviceCopied = r1.copied === 1 && r1.playlists === 1 && again.copy === 0 && again.unchanged === 1;
+      const p2 = await inv('device_plan', { volume: card, items: [], playlists: [] }), r2 = await inv('device_apply', { planId: p2.id, onProgress: new TAURI.core.Channel() });
+      out.deviceSync = out.deviceCopied && r2.deleted === 2 && !r2.failed.length; if (!out.deviceSync) out.deviceDiag = JSON.stringify({ r1, again: again.copy, r2 });
+    } catch (e) { out.deviceDiag = String(e?.message || e); }
     // the startup path itself (cache, then the background check) runs to the end on the desktop
     out.startup = await Promise.race([startLibrary().then(() => true, e => 'error: ' + (e?.message || e)), new Promise(r => setTimeout(() => r('timeout'), 30000))]);
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);

@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
+mod devices;
 mod dlna;
 mod scan;
 mod tags;
@@ -193,7 +194,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, devices::devices_list, devices::device_pair, devices::device_unpair, devices::device_settings, devices::device_plan, devices::device_apply, devices::device_cancel, devices::device_outbox, devices::device_outbox_ack, devices::device_write_notes])
         .on_window_event(main_window_event)
         .setup(move |app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.

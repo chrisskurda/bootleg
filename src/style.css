@@ -253,3 +253,11 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .djp .badge { display: inline-block; padding: 1px 7px; border-radius: 9px; background: var(--panel2); font-size: 11px; margin: 2px; } .djp .badge.ok { color: var(--ok); } .djp .badge.warn { color: var(--bad); }
 .qi .qb { display: flex; gap: 3px; }
 @media (max-width: 900px) { .djp .decks { grid-template-columns: minmax(0, 1fr); } }
+
+/* Devices (players and SD cards) */
+.devices .lib-head h3 { margin: 0; } .dv-card .lib-head > input { font-weight: 600; } .dv-card.bad { border-color: var(--bad); }
+.dv-space { position: relative; height: 6px; border-radius: 99px; background: var(--panel2); overflow: hidden; display: flex; } .dv-space i { display: block; height: 100%; } .dv-space .other { background: #3a4060; } .dv-space .ours { background: var(--accent); }
+.dv-pls { display: flex; flex-wrap: wrap; gap: 4px 14px; max-width: 420px; justify-content: flex-end; }
+.dv-plan { display: flex; flex-direction: column; gap: 6px; } .dv-plan ul { margin: 6px 0; padding-left: 18px; max-height: 240px; overflow: auto; }
+.dv-preview { max-height: 240px; overflow: auto; background: #0f1320; border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-family: var(--mono); font-size: 11px; }
+.dv-confirm, .dv-out { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; } .dv-prog { display: flex; gap: 10px; align-items: center; }

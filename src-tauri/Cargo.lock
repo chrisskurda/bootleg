@@ -327,6 +327,7 @@ name = "bootleg"
 version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
+ "bootleg-sync",
  "lofty",
  "serde",
  "serde_json",
@@ -337,7 +338,20 @@ dependencies = [
  "tauri-plugin-http",
  "tauri-plugin-single-instance",
  "tiny_http",
+ "toml 1.2.3+spec-1.1.0",
  "ureq",
+]
+
+[[package]]
+name = "bootleg-sync"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml 1.2.3+spec-1.1.0",
+ "uuid",
 ]
 
 [[package]]
