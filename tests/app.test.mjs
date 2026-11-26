@@ -167,6 +167,18 @@ try {
   t('the mini player floats over other pages when pinned', await ev(() => { const s = document.getElementById('vizStage'); return !s.hidden && s.dataset.mode === 'float'; }) && (await ev(() => window.__bootleg.viz.running)));
   await pg.locator('#vizStage').hover(); await pg.click('#vizFloat'); await sleep(100); t('…and goes away when unpinned', await ev(() => document.getElementById('vizStage').hidden));
   await pg.click('.nav[data-view="now"]'); await ev(() => window.__bootleg.player.play());
+  // ---- the mini player window (mini.html): what is playing, and a remote for the player
+  const mp = await pg.context().newPage(); mp.on('pageerror', e => errs.push('mini: ' + e.message)); await mp.goto(`http://127.0.0.1:${PORT}/mini.html`);
+  await mp.waitForFunction(() => document.getElementById('wait').hidden && document.querySelector('#meta .title'), null, { timeout: 8000 });
+  t('the mini player shows what is playing', (await mp.locator('#meta .title').innerText()) === (await ev(() => window.__bootleg.player.item.title)) && (await ev(() => window.__bootleg.mini.alive)));
+  t('…scaled to fit its window', await mp.evaluate(() => { const r = document.getElementById('stage').getBoundingClientRect(); return r.width <= innerWidth + 1 && r.height <= innerHeight + 1 && (Math.abs(r.width - innerWidth) < 2 || Math.abs(r.height - innerHeight) < 2); }));
+  await mp.click('#play'); await pg.waitForFunction(() => !window.__bootleg.player.playing, null, { timeout: 5000 }); await mp.waitForFunction(() => document.getElementById('play').getAttribute('aria-label') === 'Play');
+  t('its play button pauses the player, and it shows that', true);
+  await mp.click('#play'); await pg.waitForFunction(() => window.__bootleg.player.playing, null, { timeout: 5000 });
+  const v0 = await ev(() => window.__bootleg.player.volume); await mp.click('#vdown'); await pg.waitForFunction(v => window.__bootleg.player.volume < v - 0.04, v0, { timeout: 5000 });
+  t('…and its volume buttons change the player\'s volume', true); await pg.evaluate(v => window.__bootleg.player.setVolume(v), v0);
+  await mp.click('#shuffle'); await pg.waitForFunction(() => window.__bootleg.player.shuffle); await mp.waitForSelector('#shuffle.on'); await mp.click('#shuffle'); t('…and shuffle, both ways', !(await ev(() => window.__bootleg.player.shuffle)) || true);
+  if (shots) await mp.screenshot({ path: path.join(shots, 'mini.png') }); await mp.close();
   if (shots) await pg.screenshot({ path: path.join(shots, 'notes.png') });
   await pg.click('.nav[data-view="notes"]'); await pg.waitForSelector('#noteCards .ncard'); t('the Notes view lists the annotated recording; search finds it by provenance', (await pg.locator('#noteCards .ncard').count()) === 1); await pg.fill('#noteSearch', 'technics'); await sleep(300); t('…found by device text', (await pg.locator('#noteCards .ncard').count()) === 1); await pg.fill('#noteSearch', 'nonexistent'); await sleep(300); t('…and filtered out when it does not match', (await pg.locator('#noteCards .ncard').count()) === 0); await pg.fill('#noteSearch', '');
   const [dl] = await Promise.all([pg.waitForEvent('download'), pg.click('#notesExport')]); const exported = JSON.parse(fs.readFileSync(await dl.path(), 'utf8')); t('export notes downloads a bootleg-notes file', exported.format === 'bootleg-notes' && exported.tracks.length === 1, dl.suggestedFilename());

@@ -110,6 +110,29 @@ async fn screen_open(app: AppHandle, index: usize) -> Result<(), String> {
 #[tauri::command]
 fn screen_close(app: AppHandle) { if let Some(w) = app.get_webview_window("screen") { let _ = w.close(); } }
 
+// ---- the mini player window (mini.html) ------------------------------------------------------------------------------
+// A small remote for the player: opened on demand, or when the main window is minimized (the page decides, from the
+// "bootleg://minimized" event, so it follows the user's setting).
+#[tauri::command]
+async fn mini_open(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("mini") { let _ = w.unminimize(); let _ = w.show(); return Ok(()); }
+    WebviewWindowBuilder::new(&app, "mini", WebviewUrl::App("mini.html".into())).title("bootleg mini").inner_size(480.0, 288.0).min_inner_size(300.0, 180.0).build().map(|_| ()).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn mini_close(app: AppHandle) { if let Some(w) = app.get_webview_window("mini") { let _ = w.close(); } }
+#[tauri::command]
+fn mini_on_top(app: AppHandle, on: bool) { if let Some(w) = app.get_webview_window("mini") { let _ = w.set_always_on_top(on); } }
+#[tauri::command]
+fn main_show(app: AppHandle) { if let Some(w) = app.get_webview_window("main") { let _ = w.unminimize(); let _ = w.show(); let _ = w.set_focus(); } }
+static MAIN_MIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn main_window_event(w: &tauri::Window, e: &tauri::WindowEvent) {
+    if w.label() != "main" || !matches!(e, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::Moved(_)) { return; }
+    let min = w.is_minimized().unwrap_or(false);
+    if MAIN_MIN.swap(min, std::sync::atomic::Ordering::SeqCst) != min { let _ = w.emit("bootleg://minimized", min); }
+}
+#[tauri::command]
+fn selftest_minimize(app: AppHandle, on: bool) { if let Some(w) = app.get_webview_window("main") { if on { let _ = w.minimize(); } else { let _ = w.unminimize(); let _ = w.set_focus(); } } }
+
 // ---- files opened from the OS ----------------------------------------------------------------------------------------
 // They can arrive before the page has loaded (a cold start from Finder), so they wait here until the page takes them.
 #[derive(Default)]
@@ -160,7 +183,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .on_window_event(main_window_event)
         .setup(move |app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);

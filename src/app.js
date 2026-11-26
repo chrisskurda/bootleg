@@ -25,6 +25,7 @@ import { makeNativeTagReader, AUDIO_RE, wanted, sourcesFromFiles, webSource, tau
 import { initNowView } from '/lib/now-view.js';
 import { VizDock } from '/lib/viz-dock.js';
 import { ListenHeat, SpectroCache, IdbKV, MapKV } from '/lib/listen-heat.js';
+import { MiniHost } from '/lib/mini-host.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -192,7 +193,7 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { ...PLAY_DEFAULTS, spectro: 'all', vizFloat: false, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -451,6 +452,7 @@ async function paintSettings() {
     row('Play and double-click', 'Replace: the album, playlist or list you play becomes the queue. Build a queue: the queue is only ever added to — double-click adds to the end (playing at once if nothing is), ▶ plays straight away and keeps the rest. The “next” and “+ queue” buttons work the same in both.', pick('playModel', PLAY_MODELS)),
     h('h3', {}, 'Now playing'),
     row('Spectrogram on the timeline', 'The whole song’s spectrogram is drawn once per recording and remembered. For server tracks this downloads the file once more.', pick('spectro', { all: 'Local files and server tracks', local: 'Local files only', off: 'Off' }, () => nowView.refresh())),
+    TAURI ? row('Mini player when bootleg is minimized', 'A small window with the controls and what is playing (like the Car Thing app). It goes away again when the main window comes back. The ◱ button in the player bar opens it any time.', h('input', { type: 'checkbox', id: 'set-miniOnMinimize', checked: !!settings.miniOnMinimize, onchange: e => { settings.miniOnMinimize = e.target.checked; applySettings(); } })) : '',
     row('Mini visualizer while browsing', 'Keeps the visualizer in the corner on the other pages (the ▭ button on the visualizer does the same).', h('input', { type: 'checkbox', id: 'set-vizFloat', checked: !!settings.vizFloat, onchange: e => { settings.vizFloat = e.target.checked; applySettings(); placeViz(); } })),
     TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
     ...(tagFiles ? tagFileSettings(row, chk, num) : []),
@@ -484,6 +486,20 @@ $('#screenBtn').onclick = async () => {
   catch (e) { toast(String(e), true); }
 };
 $('#screenBtn').addEventListener('mouseenter', paintScreens); paintScreens();
+
+// ------------------------------------------------------------------ the mini player (mini.html): a small remote in its own window
+const mini = new MiniHost({ player, onShowMain: () => (TAURI ? TAURI.core.invoke('main_show') : window.focus()) });
+async function openMini() {
+  try { if (TAURI) await TAURI.core.invoke('mini_open'); else if (!window.open('/mini.html', 'bootleg-mini', 'popup,width=480,height=288')) toast('Allow pop-ups to open the mini player', true); }
+  catch (e) { toast(String(e), true); }
+}
+$('#miniBtn').onclick = openMini;
+// minimizing the main window brings the mini player up (Settings → Now playing); restoring it puts away one we opened
+let autoMini = false;
+TAURI?.event.listen('bootleg://minimized', ({ payload: min }) => {
+  if (min && settings.miniOnMinimize && player.item && !mini.alive) { autoMini = true; openMini(); }
+  else if (!min && autoMini) { autoMini = false; TAURI.core.invoke('mini_close'); }
+});
 
 // ------------------------------------------------------------------ outputs (cast targets)
 const SUFFIX_MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav' };
@@ -578,6 +594,8 @@ async function selfTest(dir) {
       const res = await tf.apply(await tf.pending()); await wait(() => lt.tagged && !lt.edited && lt.title === 'Self Test Edited', 15000).catch(() => {});
       const back = await lib.nativeReader(lt.src.path); out.tagWrite = res.length === 1 && res[0].ok && back?.title === 'Self Test Edited' && String(back?.year) === '1999' && trackKey(lt) !== k0; if (!out.tagWrite) out.tagWriteDiag = JSON.stringify({ res: res.map(r => r.error || r.path), back: back && { title: back.title, year: back.year } });
     }
+    // minimizing the main window brings up the mini player, which connects back to the player; restoring puts it away
+    try { await TAURI.core.invoke('selftest_minimize', { on: true }); await wait(() => mini.alive, 12000); out.miniOnMinimize = true; mini.cmd({ cmd: 'volume', to: 0.5 }); await TAURI.core.invoke('selftest_minimize', { on: false }); await wait(() => !mini.alive, 12000); out.miniClosed = true; } catch (e) { out.miniDiag = String(e?.message || e); }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -596,5 +614,5 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
-  window.__bootleg = { remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

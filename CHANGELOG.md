@@ -6,7 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-25
+
 ### Added
+- **Mini player**: a small window with what is playing and the controls (play, previous/next, seek, volume, shuffle, repeat), styled like the Car Thing app. On the desktop it comes up when you minimize bootleg and goes away when you bring bootleg back (Settings → Now playing), and the ◱ button in the player bar opens it any time; it can stay on top of other windows. In the browser it opens as a pop-up.
 - **Now playing, redesigned around the track**: a large cover and everything bootleg knows about it (track, year, genre, BPM, key, file format and bitrate, where it lives, lyrics), and *Up next* from the queue. A **timeline** under it shows the song's spectrogram (drawn once per recording and remembered), your timed notes as callouts and ranges as bands (click one to jump there), and a **listening heatmap** of the parts you actually play most. Click anywhere on it to seek.
 - **Visualizer page** in the left pane, with every pack and Look & FX setting out in the open. On Now playing the visualizer is a tile: ⚙ slides its settings in (also in fullscreen), ⤢ opens the page, ⧉ pops it out to another window or display, ⛶ goes fullscreen, and ▭ keeps it as a **mini player** in the corner while you browse. The pack never reloads when it moves between them.
 - **Extensions can add pages to the left pane** (`api.ui.addView`) and **process the audio** on its way to the speakers (`api.audio.insert`). Included, off by default: a **10-band equalizer** with presets and a preamp.
@@ -52,5 +55,6 @@ First release: a music player for large libraries, with stem mixing, notes and l
 ### Fixed
 - Playback no longer waits for a stream to finish loading before starting, falls back to downloading the file when a stream is blocked or stalls, and shows a message saying why a track can't play instead of failing silently.
 
-[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/chrisskurda/bootleg/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/chrisskurda/bootleg/releases/tag/v0.1.0
