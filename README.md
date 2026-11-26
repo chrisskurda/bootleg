@@ -1,6 +1,6 @@
 # bootleg
 
-A music player for **large libraries**, with live visualizers, stem mixing, notes and ratings, casting and server support. A web app that also runs as a desktop app (macOS, Linux) through Tauri. MIT licensed.
+A music player for **large libraries**, with live visualizers, stem mixing, notes and ratings, casting and server support. A web app that also runs as a desktop app (macOS, Linux, Windows) through Tauri. MIT licensed.
 
 - **Plays** mp3, flac, m4a, ogg, opus, wav with their tags and cover art, and **stem sets** (the [bootleg stem format](docs/STEM-FORMAT.md)) — a folder of stems plus its mix, shown as one item, played from the mix instantly, with a live stem mixer (mute, solo, trim) on demand.
 - **Big libraries stay fast:** virtualized lists, a persistent incremental library cache, native (Rust) scanning and tag reading — 30,000 files scan in under a second and read their tags in a couple of seconds.

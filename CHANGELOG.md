@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Windows** (x64): continuous integration builds an installer and attaches it to releases. The desktop self-test runs there too (reported, not yet blocking a release until it has proven itself on Windows).
+
 ## [0.4.0] - 2026-11-26
 
 ### Added

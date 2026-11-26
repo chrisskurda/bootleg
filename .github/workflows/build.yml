@@ -40,6 +40,7 @@ jobs:
         include:
           - { name: macOS arm64, os: macos-latest, bundles: app, out: 'src-tauri/target/release/bundle/macos/*.app', bin: 'src-tauri/target/release/bundle/macos/bootleg.app/Contents/MacOS/bootleg' }
           - { name: Linux x64, os: ubuntu-22.04, bundles: 'deb,appimage', out: "src-tauri/target/release/bundle/deb/*.deb\nsrc-tauri/target/release/bundle/appimage/*.AppImage", bin: 'src-tauri/target/release/bootleg' }
+          - { name: Windows x64, os: windows-latest, bundles: nsis, out: 'src-tauri/target/release/bundle/nsis/*.exe', bin: 'src-tauri/target/release/bootleg.exe' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -57,10 +58,15 @@ jobs:
       - name: macOS packages
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: Windows packages
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
       - run: npm ci
       - name: Build the app
         run: npx tauri build --bundles ${{ matrix.bundles }}
       - name: Self-test the built app (scan, tags, playback, stems, cache, notes, Subsonic)
+        shell: bash
+        continue-on-error: ${{ runner.os == 'Windows' }}      # new on Windows: reported, not yet blocking a release
         env:
           # macOS runners have no user to click Play: WebKit blocks autoplay there, so the playback checks are skipped (still covered on Linux and locally)
           SELFTEST_ALLOW_NO_AUTOPLAY: ${{ runner.os == 'macOS' && '1' || '' }}
