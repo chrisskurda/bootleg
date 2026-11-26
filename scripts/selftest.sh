@@ -7,6 +7,7 @@ set -euo pipefail
 run_timeout() { local s=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$s" "$@"; else "$@" & local p=$!; ( sleep "$s"; kill "$p" 2>/dev/null ) & local k=$!; wait "$p"; local rc=$?; kill "$k" 2>/dev/null || true; return $rc; fi; }
 BIN="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; cd "$(dirname "$0")/.."
 T="$(mktemp -d)"; trap 'kill $MOCK $DLNA 2>/dev/null || true; wait $MOCK $DLNA 2>/dev/null || true; rm -rf "$T"' EXIT; mkdir -p "$T/L/A" "$T/S"
+mkdir -p "$T/card/Music/bootleg/Tester" && echo mine > "$T/card/Music/bootleg/Tester/mine.txt"   # a card with a file of the user's on it (device sync must leave it alone)
 ffmpeg -v error -y -f lavfi -i color=c=0xcc5533:s=200x200:d=1 -frames:v 1 "$T/c.png"
 ffmpeg -v error -y -f lavfi -i sine=frequency=330:duration=6 -i "$T/c.png" -map 0:a -map 1:v -c:a flac -c:v mjpeg -disposition:v attached_pic -metadata title="Self Test" -metadata artist=Tester "$T/L/A/st.flac"
 node vendor/bootleg-vizualizer/tests/make-fixture.mjs "$T/L/render" >/dev/null 2>&1
@@ -26,10 +27,11 @@ for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; run_timeout 150 "${RUN
 cat "$T/out.json"; echo
 node -e '
 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), skip = !!r.autoplayBlocked && !!process.env.SELFTEST_ALLOW_NO_AUTOPLAY;
-const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
+const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package", "deviceSync"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "package", "deviceSync", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
 if (skip) console.log("note: autoplay is blocked on this machine; playback-dependent checks were skipped");
 if (!skip && !(r.tracks >= 1 && r.renders >= 1 && r.stems === 5 && r.peak > 0.2 && r.remoteTracks === 2 && r.remotePeak > 0.2)) bad.push("playback/stems/remote");
 const log = (require("fs").existsSync(process.argv[2]) ? require("fs").readFileSync(process.argv[2], "utf8") : "").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)), has = f => log.some(f);
 if (!skip && !(has(l => l.action === "SetAVTransportURI" && /^http:\/\/[^/]+\/m\/[0-9a-f]{32}\.flac$/.test(l.uri) && l.title === "Self Test" && l.artist === "Tester" && l.mime === "audio/flac") && has(l => l.action === "Play") && has(l => l.fetched === 206 && l.bytes === 100 && /flac/.test(l.type)) && has(l => l.action === "Pause") && has(l => l.action === "Seek" && l.target === "00:00:03") && has(l => l.action === "SetVolume" && l.volume === 50) && has(l => l.artFetched === 200 && l.bytes > 100 && /^image\//.test(l.type)) && has(l => l.action === "Stop") && r.dlnaLocalRestored)) bad.push("dlna: " + JSON.stringify(log).slice(0, 400));
 if (!(r.cd && (r.cd.ok || r.cd.skipped === "not in this build"))) bad.push("cd: " + JSON.stringify(r.cd));
-if (bad.length) { console.error("SELF-TEST FAILED:", bad.join(", "), r.error || ""); process.exit(1); } console.log("self-test passed");' "$T/out.json" "$T/dlna.log"
+const fs = require("fs"), card = process.argv[3]; if (!(fs.readFileSync(card + "/Music/bootleg/Tester/mine.txt", "utf8").trim() === "mine" && fs.existsSync(card + "/.bootleg/device.toml") && !fs.existsSync(card + "/Music/bootleg/Playlists/Road.m3u8"))) bad.push("device sync touched the wrong files");
+if (bad.length) { console.error("SELF-TEST FAILED:", bad.join(", "), r.error || ""); process.exit(1); } console.log("self-test passed");' "$T/out.json" "$T/dlna.log" "$T/card"

@@ -16,8 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Ripped tracks arrive in the library with *CD rip* provenance and `rip:verified` / `rip:secure` / `rip:suspect` / `rip:damaged` tags.
   - **Check drive** reports what a drive can do on your Mac.
 - **Plugin spec 2.0** (draft, docs/PLUGIN-SPEC.md): plugins can include native code with a backend per platform, declare which platforms they support and how well tested each is, run long jobs, and add files and annotations to the library. Settings → *Extensions* is now *Plugins* and shows each plugin's status on this computer.
-
-### Added
+- **Devices** (desktop): sync to SD cards and USB-storage players, running bootleg-pod or not. Pair a card (bootleg writes only a hidden `.bootleg` folder on it), choose its playlists, a minimum rating and starred tracks, and a mode: *Add* (never deletes), *Mirror* (the card matches your choice) or *Fill* (up to the space you allow). *Check* shows what would change first. bootleg only ever replaces or removes files it put on the card itself; a file of yours with the same name makes bootleg's copy "… (bootleg)". Playlists are written to the card as .m3u8, stem sets go as their mix and details (stems if you ask), and plays, ratings, notes and tags made on a bootleg-pod come back into your notes. A sync that is cut off (card pulled) is cleaned up next time. Not yet: transcoding (tracks a player can't play are listed and left out), server tracks and .bstem packages.
 - Plan and plugin spec for **syncing to portable players** (USB-storage players, SD cards, bootleg-pod handhelds): paired players and media, add / mirror / fill modes, and bootleg only ever replacing or deleting files it put there. Plugin spec 2.0 gains `device` handlers and a shared transcoder; the spec 2.1 draft adds helper processes and an experimental-plugin flag. An experimental iPod plugin is on the roadmap.
 
 ## [0.6.0] - 2026-11-26
