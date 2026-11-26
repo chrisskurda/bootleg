@@ -9,6 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Plan and plugin spec for **syncing to portable players** (USB-storage players, SD cards, bootleg-pod handhelds): paired players and media, add / mirror / fill modes, and bootleg only ever replacing or deleting files it put there. Plugin spec 2.0 gains `device` handlers and a shared transcoder; the spec 2.1 draft adds helper processes and an experimental-plugin flag. An experimental iPod plugin is on the roadmap.
 
+## [0.6.0] - 2026-11-26
+
+### Added
+- **Gapless playback** (the new default, *Settings → Playing → Between tracks*): the next track starts on the exact sample the last one ends, so live albums and mixed albums play without a gap. A track still starts streaming at once; a couple of seconds in it moves onto a decoded deck in place, and the next track is decoded ahead of time.
+- **Crossfades** of 2 to 24 seconds instead, equal power, optionally **tempo-matched**: the next track comes in at this one's tempo on a bar line, then eases back to its own (needs BPM tags; the pitch moves a little, like a record).
+- **DJ mode** (the *DJ* button in the player bar, or `d`): two decks with tempo, sync (tempo and bar phase), nudge and bar jumps, high / mid / low EQ with kills, volume, waveforms with 4-bar lines, a crossfader and auto-mix on the next bar line, and hints when the tempos lock or the keys may clash. Playing a track loads it onto the idle deck; the queue gets A / B buttons. Leaving DJ mode keeps the deck the crossfader is on playing, as the current queue track.
+
+### Changed
+- Every source (the streaming player, the stem mixer, the decks) now plays through one mix bus; the visualizer listens to it, so it sees both tracks during a crossfade, and volume no longer changes what it sees.
+- Tracks over 20 minutes (or files over 300 MB) are never decoded whole: they keep streaming and change over to the next track without decoding it. *Between tracks → Off* brings back the old behaviour (each track loads when the last one ends) and uses the least memory.
+
 ## [0.5.0] - 2026-11-26
 
 ### Added

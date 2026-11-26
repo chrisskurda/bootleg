@@ -83,6 +83,42 @@ try {
   await pg.click('#next'); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Second Quarter'); t('next goes to the next track in the list', true);
   await pg.click('#prev'); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Café Ünïcødé'); t('previous goes back (position under 3 s)', true);
   await pg.waitForFunction(() => isFinite(window.__bootleg.player.audio.duration)); await ev(() => { const a = window.__bootleg.player.audio; a.currentTime = a.duration - 0.25; }); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Second Quarter', null, { timeout: 8000 }); t('a track that ends advances to the next on its own', true);
+
+  // ---- between tracks: gapless (sample-exact on the audio clock), crossfade, DJ mode
+  await ev(() => { const p = window.__bootleg.player; window.__saved = { q: p.queue.slice(), i: p.index, repeat: p.repeat, shuffle: p.shuffle }; });
+  const watch = async (setup, until, ms = 20000) => pg.evaluate(async ([setup, until, ms]) => {
+    const B = window.__bootleg, p = B.player, list = B.lib.tracks.slice().sort((a, b) => a.title.localeCompare(b.title)), rec = [], loads = { n: 0 }, both = { max: 0 };
+    const ol = p._load.bind(p); p._load = it => { loads.n++; return ol(it); };
+    const iv = setInterval(() => { const pl = p.plan; if (pl && !rec.some(r => r.T === pl.T)) { const m = p.main; rec.push({ T: pl.T, len: pl.len, mode: p.mode, end: p.mode === 'buf' ? m.t0 + (m.dur() - m.offset) / m.rate : null, to: p.queue[pl.idx].title }); } if (p.A.playing && p.B.playing) both.max = Math.max(both.max, Math.min(p.A.fade.gain.value, p.B.fade.gain.value)); }, 15);
+    p.setRepeat('off'); p.setShuffle(false); await (0, eval)(setup)(p, list); const t0 = performance.now();
+    while (!(0, eval)(until)(p, list) && performance.now() - t0 < ms) await new Promise(r => setTimeout(r, 50));
+    clearInterval(iv); p._load = ol; return { rec, loads: loads.n, both: both.max, index: p.index, mode: p.mode, titles: list.map(x => x.title), ok: (0, eval)(until)(p, list) };
+  }, [setup.toString(), until.toString(), ms]);
+  const gl = await watch(async (p, list) => { p.setTransition({ mode: 'gapless', seconds: 0, match: false }); await p.playList(list, 0); }, p => p.index === 2 && p.pos() > 0.3);
+  const exact = gl.rec.filter(r => r.mode === 'buf');
+  t('gapless: the next tracks start from decoded decks, without loading them the slow way', gl.ok && gl.loads === 1 && gl.mode === 'buf', JSON.stringify({ ok: gl.ok, loads: gl.loads, mode: gl.mode }));
+  t('gapless: each next track is scheduled on the exact moment the last one ends (< 1 ms)', exact.length >= 2 && exact.every(r => Math.abs(r.T - r.end) < 0.001 && r.len === 0), JSON.stringify(exact.map(r => [r.to, +(r.T - r.end).toFixed(5)])));
+  const xf = await watch(async (p, list) => { p.setTransition({ mode: 'crossfade', seconds: 2, match: false }); await p.playList(list, 0); }, p => p.index === 2 && p.pos() > 1.5);
+  const xr = xf.rec.filter(r => r.mode === 'buf').pop();
+  t('crossfade: the next track comes in 2 s before the end and both play together, equal power', xf.ok && xr && Math.abs(xr.len - 2) < 0.05 && xf.both > 0.5, JSON.stringify({ ok: xf.ok, len: xr && xr.len, both: xf.both }));
+  await ev(async () => { const B = window.__bootleg, p = B.player; p.setTransition({ mode: 'gapless', seconds: 0, match: false }); await p.playList(B.lib.tracks.filter(x => x.title !== 'Low Pressure'), 0); });
+  await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3);
+  await pg.click('#djBtn'); await pg.waitForFunction(() => window.__bootleg.player.dj && !document.getElementById('djPanel').hidden && window.__bootleg.player.mode === 'buf' && window.__bootleg.player.A.buf, null, { timeout: 10000 });
+  const dj0 = await ev(() => { const p = window.__bootleg.player; const m = p.djMain(); return { title: p.item?.title, deck: m.name, on: m.item === p.item && m.playing && !p.djIdle().playing, playing: p.playing, decks: document.querySelectorAll('#djPanel .deck').length }; });
+  t('DJ mode: what is playing moves onto a deck, in place, and the panel shows two decks', dj0.on && dj0.playing && dj0.decks === 2 && !!dj0.title, JSON.stringify(dj0));
+  await ev(async () => { const B = window.__bootleg, p = B.player; await p.playList([B.lib.tracks.find(x => x.title === 'Low Pressure')], 0); });
+  t('DJ mode: playing a track loads it onto the idle deck instead of replacing the music', (await ev(() => { const p = window.__bootleg.player; const m = p.djMain(), i = p.djIdle(); return i.item?.title === 'Low Pressure' && m.playing && !i.playing && p.item === m.item; })));
+  await pg.locator('#queue').evaluate(q => { q.hidden = false; }); await ev(() => window.__bootleg.player._emit());
+  t('DJ mode: the queue offers A / B per track', (await pg.locator('#queueList .qi button[title="Load onto deck B"]').count()) > 0);
+  const idleName = await ev(() => { const p = window.__bootleg.player; p.seek(0.2); p.autoMix(2, false); return p.djIdle().name; });
+  await pg.waitForFunction(n => { const p = window.__bootleg.player; return !p.auto && p.x === (n === 'B' ? 1 : 0) && p[n].playing; }, idleName, { timeout: 10000 });
+  t('DJ mode: auto-mix brings the other deck in and moves the crossfader across', (await ev(() => { const p = window.__bootleg.player; return p.item.title === 'Low Pressure' && !p.djIdle().playing; })));
+  await pg.keyboard.press('d'); await pg.waitForFunction(() => !window.__bootleg.player.dj && document.getElementById('djPanel').hidden);
+  const dj1 = await ev(() => { const p = window.__bootleg.player; return { title: p.item?.title, inQueue: p.queue[p.index] === p.main.item, playing: p.playing, mode: p.mode }; });
+  t('leaving DJ mode (d) keeps the deck the crossfader is on playing, as the current queue track', dj1.title === 'Low Pressure' && dj1.inQueue && dj1.playing && dj1.mode === 'buf', JSON.stringify(dj1));
+  await pg.locator('#queue').evaluate(q => { q.hidden = true; });
+  await ev(async () => { const p = window.__bootleg.player, s = window.__saved; p.setRepeat(s.repeat); p.setShuffle(s.shuffle); await p.playList(s.q, s.i); });   // back to where the tests above left it
+  await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.2);
   // queue
   await pg.locator('#trackList .row').first().hover(); await pg.locator('#trackList .row').first().locator('.acts button:has-text("+ queue")').click(); await sleep(200); await pg.click('#qToggle');
   t('"+ queue" adds to the queue and the drawer lists it', (await pg.locator('#queueList .qi').count()) === 4 && (await pg.locator('#qCount').innerText()) === '4', await pg.locator('#qCount').innerText());
@@ -130,12 +166,12 @@ try {
   const listed = await pg.locator('#trackList .row .tt').allInnerTexts(); t('a stem set is listed once in the track list with a stems badge (its mix and stems are not separate rows)', listed.length === 4 && listed.filter(x => /stems/.test(x)).length === 1 && !listed.some(x => /^(mix|kick|snare|hats|keys|sub)$/i.test(x.trim())), listed.join(' | '));
   await pg.locator('#settingsBody').count(); await pg.click('.nav[data-view="settings"]'); await pg.locator('#settingsBody .srow', { hasText: 'Load stems' }).locator('select').selectOption('manual'); await pg.click('.nav[data-view="tracks"]');
   await pg.locator('#trackList .row', { hasText: 'stems' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.item?.kind === 'render' && window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'weather-report'); await pg.selectOption('#packSelect', 'stem-rack'); await sleep(600); await pg.click('.nav[data-view="now"]');
-  t('"Only when I press Load stems": a stem-aware pack does not load them, the mix keeps playing', (await ev(() => window.__bootleg.player.stemsState + ',' + window.__bootleg.player.mode)) === 'unloaded,element' && (await pg.locator('#loadStems').count()) === 1);
+  t('"Only when I press Load stems": a stem-aware pack does not load them, the mix keeps playing', /^unloaded,(element|buf)$/.test(await ev(() => window.__bootleg.player.stemsState + ',' + window.__bootleg.player.mode)) && (await pg.locator('#loadStems').count()) === 1);
   const p0 = await ev(() => window.__bootleg.player.pos()); await pg.click('#loadStems'); await pg.waitForFunction(() => window.__bootleg.player.mode === 'deck' && window.__bootleg.player.stemsState === 'ready'); t('Load stems swaps to the stem engine at the same position', (await ev(() => window.__bootleg.player.pos())) >= p0 - 0.2 && (await pg.locator('#stemRows .stem').count()) === 5);
-  const p1 = await ev(() => window.__bootleg.player.pos()); await pg.click('#unloadStems'); await pg.waitForFunction(() => window.__bootleg.player.mode === 'element' && window.__bootleg.player.stemsState === 'unloaded'); t('Unload frees the stems and goes back to the mix where it was', (await ev(() => window.__bootleg.player.pos())) >= p1 - 0.3 && (await ev(() => window.__bootleg.player.deck.stems.length)) === 0);
+  const p1 = await ev(() => window.__bootleg.player.pos()); await pg.click('#unloadStems'); await pg.waitForFunction(() => window.__bootleg.player.mode !== 'deck' && window.__bootleg.player.stemsState === 'unloaded'); t('Unload frees the stems and goes back to the mix where it was', (await ev(() => window.__bootleg.player.pos())) >= p1 - 0.3 && (await ev(() => window.__bootleg.player.deck.stems.length)) === 0);
   await pg.click('.nav[data-view="settings"]'); await pg.locator('#settingsBody .srow', { hasText: 'Load stems' }).locator('select').selectOption('visualizer'); await pg.locator('#settingsBody .srow', { hasText: 'Show stem sets in the track list' }).locator('input').uncheck(); await pg.click('.nav[data-view="tracks"]');
   // back to a plain track: stems are released
-  await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row').first().dblclick(); await pg.waitForFunction(() => window.__bootleg.player.mode === 'element' && window.__bootleg.player.playing);
+  await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row').first().dblclick(); await pg.waitForFunction(() => window.__bootleg.player.mode !== 'deck' && window.__bootleg.player.playing);
   t('switching to a plain track releases the stems from the visualizer', (await ev(() => window.__bootleg.feed.taps.length)) === 0 && (await pg.locator('#stemsPanel').isHidden()) || true);
   await pg.click('.nav[data-view="now"]'); await sleep(600); const back = await ev(() => document.querySelector('#vizStage iframe').contentWindow.__AUDIO.stems.length); t('…and A.stems is empty again for a plain track', back === 0, String(back));
 

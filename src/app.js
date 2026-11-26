@@ -1,7 +1,8 @@
 // bootleg — the app. Library, queue, player bar, stem mixer and the visualizer view.
 import { AudioFeed } from '/vendor/bootleg-vizualizer/core/audio.js';
 import { Library } from '/lib/library.js';
-import { Player } from '/lib/player.js';
+import { Player, TRANSITIONS, transitionOf } from '/lib/player.js';
+import { initDJ } from '/lib/dj-panel.js';
 import { VizHost } from '/lib/viz.js';
 import { h, plural } from '/lib/controls.js';
 import { MemoryBackend } from '/lib/notes.js';
@@ -193,10 +194,11 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, transition: 'gapless', matchTempo: false, djFade: 6, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
-function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
+function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; applyTransition(); lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
+function applyTransition() { const t = transitionOf(settings.transition, settings.matchTempo), c = player.transition; if (t.mode !== c.mode || t.seconds !== c.seconds || t.match !== c.match) player.setTransition(t); }
 let rescanTimer = 0; function armRescan() { clearInterval(rescanTimer); rescanTimer = 0; if (TAURI && settings.rescanMinutes > 0) rescanTimer = setInterval(() => syncAll(true), settings.rescanMinutes * 60000); }
 const scan = { on: false, text: '' };
 function paintProgress() {
@@ -312,9 +314,15 @@ function updateBar() {
   $('#stageTitle').textContent = it ? `${it.title}${it.artist ? ' — ' + it.artist : ''}` : ''; renderQueue(); buildStems(); placeViz(); ensureForViz();
 }
 player.addEventListener('change', updateBar);
+// ------------------------------------------------------------------ DJ mode
+const dj = initDJ({ player, h, fmt, settings, onSettings: patch => { Object.assign(settings, patch); applySettings(); } });
+$('footer.bar').before(dj.el);
+function syncDJ() { const on = player.dj; if (dj.el.hidden === on) dj.show(on); $('#djBtn').classList.toggle('on', on); }
+player.addEventListener('change', syncDJ);
+$('#djBtn').onclick = () => player.setDJ(!player.dj);
 player.addEventListener('playerror', e => toast(e.detail, true));      // never fail silently: say why nothing is playing
 let drag = false; seek.oninput = () => { drag = true; }; seek.onchange = () => { const d = player.dur(); if (d) player.seek(seek.value / 1000 * d); drag = false; };
-(function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; vizDock.update(); $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
+(function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; vizDock.update(); dj.paint(); $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
 playBtn.onclick = () => { if (!player.item) { if (shown.length) player.playList(shown, 0); else if (lib.renders.length) player.playList(lib.renders, 0); return; } player.toggle(); };
 $('#prev').onclick = () => player.prev(); $('#next').onclick = () => player.next();
 $('#shuffle').onclick = () => player.setShuffle(!player.shuffle); $('#repeat').onclick = () => player.setRepeat({ off: 'all', all: 'one', one: 'off' }[player.repeat]);
@@ -323,7 +331,7 @@ const vol = $('#volume'); vol.value = player.volume; vol.oninput = () => player.
 // ------------------------------------------------------------------ queue
 function renderQueue() {
   const q = player.queue, list = $('#queueList'); $('#queueEmpty').hidden = q.length > 0;
-  list.replaceChildren(...q.map((t, i) => h('div', { class: 'qi' + (i === player.index ? ' cur' : ''), onclick: () => player.jump(i) }, h('div', { style: 'min-width:0' }, h('div', { class: 't' }, t.title), h('div', { class: 's' }, t.artist || (t.kind === 'render' ? 'stem render' : ''))), h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); player.remove(i); } }, '✕'))));
+  list.replaceChildren(...q.map((t, i) => h('div', { class: 'qi' + (i === player.index ? ' cur' : ''), onclick: () => player.jump(i) }, h('div', { style: 'min-width:0' }, h('div', { class: 't' }, t.title), h('div', { class: 's' }, t.artist || (t.kind === 'render' ? 'stem render' : ''))), h('span', { class: 'qb' }, ...(player.dj ? [h('button', { class: 'mini', title: 'Load onto deck A', onclick: e => { e.stopPropagation(); player.djLoad(player.A, t); } }, 'A'), h('button', { class: 'mini', title: 'Load onto deck B', onclick: e => { e.stopPropagation(); player.djLoad(player.B, t); } }, 'B')] : []), h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); player.remove(i); } }, '✕')))));
 }
 $('#qToggle').onclick = () => { const q = $('#queue'); q.hidden = !q.hidden; $('#qToggle').classList.toggle('on', !q.hidden); }; $('#qClear').onclick = () => player.clear();
 
@@ -364,7 +372,7 @@ addEventListener('keydown', e => {
   else if (view === 'albums' && settings.albumView === 'flow' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { flowIdx += e.key === 'ArrowRight' ? 1 : -1; renderAlbums(); }
   else if (e.key === 'ArrowRight') { e.shiftKey ? player.next() : player.seek(player.pos() + 5); } else if (e.key === 'ArrowLeft') { e.shiftKey ? player.prev() : player.seek(player.pos() - 5); }
   else if (e.key === 'ArrowUp') { vol.value = Math.min(1, +vol.value + 0.05); vol.oninput(); } else if (e.key === 'ArrowDown') { vol.value = Math.max(0, +vol.value - 0.05); vol.oninput(); }
-  else if (e.key === 'f' && vizShown()) $('#fsBtn').click(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
+  else if (e.key === 'd' && !e.metaKey && !e.ctrlKey) player.setDJ(!player.dj); else if (e.key === 'f' && vizShown()) $('#fsBtn').click(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
 });
 
 // ------------------------------------------------------------------ extensions (optional add-ons; none ship enabled)
@@ -453,6 +461,8 @@ async function paintSettings() {
     h('div', { class: 'muted small' }, 'Notes, ratings and tags belong to the recording, so they follow it across libraries. A library’s mode only chooses which fields and tools are offered.'),
     h('h3', {}, 'Playing'),
     row('Clicking an album', 'In every album view. A double-click always plays the album and shows its tracks.', pick('albumClick', ALBUM_CLICKS, () => { gridKey = null; })),
+    row('Between tracks', 'Gapless: the next track starts on the exact sample the last one ends (live albums, DJ mixes). A crossfade overlaps them instead. Both decode the current and the next track in the background (tracks over 20 minutes stream as before and change over without decoding). Off: each track loads when the last one ends, using the least memory.', pick('transition', TRANSITIONS)),
+    row('Match tempo when crossfading', 'With a crossfade, the next track comes in at this one’s tempo, on a bar line, then eases back to its own tempo (the pitch moves a little, like a record). Needs a BPM tag on both.', chk('matchTempo')),
     row('Play and double-click', 'Replace: the album, playlist or list you play becomes the queue. Build a queue: the queue is only ever added to — double-click adds to the end (playing at once if nothing is), ▶ plays straight away and keeps the rest. The “next” and “+ queue” buttons work the same in both.', pick('playModel', PLAY_MODELS)),
     h('h3', {}, 'Now playing'),
     row('Spectrogram on the timeline', 'The whole song’s spectrogram is drawn once per recording and remembered. For server tracks this downloads the file once more.', pick('spectro', { all: 'Local files and server tracks', local: 'Local files only', off: 'Off' }, () => nowView.refresh())),

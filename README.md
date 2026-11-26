@@ -3,6 +3,7 @@
 A music player for **large libraries**, with live visualizers, stem mixing, notes and ratings, casting and server support. A web app that also runs as a desktop app (macOS, Linux, Windows) through Tauri. MIT licensed.
 
 - **Plays** mp3, flac, m4a, ogg, opus, wav with their tags and cover art, and **stem sets** (the [bootleg stem format](docs/STEM-FORMAT.md)) — a folder of stems plus its mix, shown as one item, played from the mix instantly, with a live stem mixer (mute, solo, trim) on demand.
+- **Gapless playback, crossfades and a DJ mode:** the next track starts on the exact sample the last one ends (or crossfades, 2–24 s, optionally tempo-matched on a bar line); *DJ* opens two decks with tempo, sync, three-band EQ with kills and a crossfader with auto-mix.
 - **Big libraries stay fast:** virtualized lists, a persistent incremental library cache, native (Rust) scanning and tag reading — 30,000 files scan in under a second and read their tags in a couple of seconds.
 - **Libraries** with a *Listening* or *Studio* mode; notes, ratings, tags, provenance and status that follow the recording; album views (grid, list, cover flow, split with merged details); `.nfo` files as a metadata source; playlists (M3U) and notes import/export.
 - **Mini player**: a small window with the controls, styled like the Car Thing app — it comes up when you minimize bootleg.
