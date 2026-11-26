@@ -1,5 +1,7 @@
 # Writing a library source plugin
 
+> These contracts are unchanged in [plugin spec 2.0](PLUGIN-SPEC.md) (draft), which lets a packaged plugin register sources and outputs (`api.sources.register`, `api.outputs.register`) and add native code.
+
 A *source plugin* lets a bootleg library list and stream music that isn't a folder of files — a Subsonic server and a bootleg stem server today; a YouTube Music, Spotify, Bandcamp or Jellyfin plugin tomorrow. **`src/lib/sources/subsonic.js` is the reference implementation: copy it.** The contract is documented at the top of `src/lib/sources/plugin.js`.
 
 ## The contract

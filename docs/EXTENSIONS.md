@@ -1,5 +1,7 @@
 # Extensions
 
+> This is plugin **spec 1** (JS-only extensions). [Spec 2.0](PLUGIN-SPEC.md) (draft) adds one package format for every plugin kind, native code with per-platform backends, and platform support levels; spec 1 extensions keep working.
+
 Optional add-ons that sit **outside the core app** and use a small, stable API. They are off until the user turns them on (Settings → Extensions), and the core knows nothing about any particular one. Source plugins (music in) and output plugins (cast targets) have their own contracts in `SOURCE-PLUGINS.md`; an *extension* is for everything else — remotes, integrations, scrobblers, overlays.
 
 ## Layout
