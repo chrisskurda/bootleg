@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Jazz Cup** visualizer pack (vendored from bootleg-vizualizer): a 90s paper-cup pattern that dances with the music.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added
