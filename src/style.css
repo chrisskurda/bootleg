@@ -54,7 +54,9 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .mini { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; cursor: pointer; font-size: 11px; } .mini:hover { border-color: var(--faint); }
 
 /* albums + renders */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 16px; padding-top: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 16px; grid-auto-flow: dense; padding-top: 14px; }
+/* an opened album in the grid: a full-width panel under its row (dense flow backfills the row with the cards after it) */
+.card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); } .ginline { grid-column: 1 / -1; margin-top: 0; position: relative; } .ginline .gclose { position: absolute; top: 8px; right: 12px; font-size: 16px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; cursor: pointer; transition: border-color .12s; } .card:hover { border-color: #3a4590; }
 .cover { width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover; display: block; background: linear-gradient(135deg, #1d2342, #2a1b4a); }
 .cover.ph { display: grid; place-items: center; color: #5d6585; font-size: 30px; }

@@ -16,7 +16,7 @@ export function stars(h, value, onset) {
   return el;
 }
 
-export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $ }) {
+export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $, playNow = ts => player.playList(ts, 0) }) {
   const drafts = new Map(); let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
   libs.onchange = () => paint(); $('#notesPanel').addEventListener('focusout', () => setTimeout(() => { if (pendingPaint) paint(); }, 0));
@@ -121,7 +121,7 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
 
   // ---- playlists
   const resolve = p => { const m = byKey(); return p.items.map(k => m.get(k)).filter(Boolean); };
-  async function playPlaylist(p) { const ts = resolve(p); if (!ts.length) { toast('None of this playlist’s tracks are in the library right now', true); return; } if (ts.length < p.items.length) toast(`${p.items.length - ts.length} track(s) not in the library`); player.playList(ts, 0); }
+  async function playPlaylist(p) { const ts = resolve(p); if (!ts.length) { toast('None of this playlist’s tracks are in the library right now', true); return; } if (ts.length < p.items.length) toast(`${p.items.length - ts.length} track(s) not in the library`); playNow(ts); }
   const m3uTrack = t => ({ title: t.title, artist: t.artist, album: t.album, duration: t.duration, path: t.src?.path || t.title });
   const exportM3U = p => saveText(p.name.replace(/[^\w .-]+/g, '_') + '.m3u8', toM3U(p.name, resolve(p).map(m3uTrack)), 'audio/x-mpegurl');
   $('#plSave').onclick = async () => { const name = $('#plName').value.trim() || 'Playlist ' + new Date().toLocaleDateString(); if (!player.queue.length) { toast('The queue is empty — add some tracks first', true); return; } await store.savePlaylist({ name, items: player.queue.map(trackKey) }); $('#plName').value = ''; toast(`Saved “${name}”`); };

@@ -2,16 +2,18 @@
 //   * dialogs + fs (plugins) to pick and scan folders,
 //   * `allow_path`: nothing is readable until the user picks it — the picked folder/file is added to the
 //     asset-protocol scope (audio streaming, range reads for tags) and the fs scope at runtime,
+//   * files opened from the OS (Finder "Open With", double-click when bootleg is the default player, `bootleg song.flac`):
+//     collected in an inbox the page drains (`take_opened`) whenever it is told something arrived (event `bootleg://opened`),
 //   * a headless self-test hook (BOOTLEG_SELFTEST=<music dir>, BOOTLEG_SELFTEST_OUT=<result json>).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 mod dlna;
 mod scan;
 mod tags;
 mod lan;
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_fs::FsExt;
 
 #[tauri::command]
@@ -100,6 +102,26 @@ async fn screen_open(app: AppHandle, index: usize) -> Result<(), String> {
 #[tauri::command]
 fn screen_close(app: AppHandle) { if let Some(w) = app.get_webview_window("screen") { let _ = w.close(); } }
 
+// ---- files opened from the OS ----------------------------------------------------------------------------------------
+// They can arrive before the page has loaded (a cold start from Finder), so they wait here until the page takes them.
+#[derive(Default)]
+struct Opened(Mutex<Vec<String>>);
+const AUDIO_EXT: [&str; 10] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf"];
+fn audio_files<I: IntoIterator<Item = PathBuf>>(paths: I) -> Vec<String> {
+    paths.into_iter().filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()).is_some_and(|e| AUDIO_EXT.contains(&e.to_ascii_lowercase().as_str())))
+        .filter_map(|p| p.canonicalize().ok()).map(|p| p.to_string_lossy().into_owned()).collect()
+}
+/// Command-line arguments (Windows/Linux open files this way) relative to the directory they were given in.
+fn arg_paths(args: impl IntoIterator<Item = String>, cwd: &Path) -> Vec<PathBuf> { args.into_iter().filter(|a| !a.starts_with('-')).map(|a| cwd.join(a)).collect() }
+fn receive_opened(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() { return; }
+    app.state::<Opened>().0.lock().unwrap().extend(paths);
+    let _ = app.emit("bootleg://opened", ());
+    if let Some(w) = app.get_webview_window("main") { let _ = w.unminimize(); let _ = w.show(); let _ = w.set_focus(); }
+}
+#[tauri::command]
+fn take_opened(app: AppHandle) -> Vec<String> { std::mem::take(&mut *app.state::<Opened>().0.lock().unwrap()) }
+
 /// Some(dir) when launched for the self-test.
 #[tauri::command]
 fn selftest_config() -> Option<String> { env::var("BOOTLEG_SELFTEST").ok() }
@@ -119,12 +141,19 @@ fn selftest_done(app: AppHandle, result: String) {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let selftest = env::var("BOOTLEG_SELFTEST").is_ok();
+    let mut builder = tauri::Builder::default().manage(Opened::default());
+    // A second launch (opening a file while bootleg runs, on Windows/Linux) hands its files to the running app and quits.
+    // Not for the self-test, which must run beside a bootleg the user may have open.
+    if !selftest {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| { receive_opened(app, audio_files(arg_paths(argv.into_iter().skip(1), Path::new(&cwd)))); }));
+    }
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
-        .setup(|app| {
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .setup(move |app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
             if env::var("BOOTLEG_SELFTEST").is_ok() { b = b.initialization_script("window.__BOOTLEG_SELFTEST = true;"); }
@@ -132,8 +161,14 @@ fn main() {
             // The self-test plays audio with no user gesture; WebKit allows that only for an active app, so make sure it is frontmost
             if env::var("BOOTLEG_SELFTEST").is_ok() { let _ = w.show(); let _ = w.set_always_on_top(true); let _ = w.set_focus(); #[cfg(target_os = "macos")] { let _ = app.handle().show(); } }
             let _ = w.set_focus();
+            if !selftest { if let Ok(cwd) = env::current_dir() { receive_opened(app.handle(), audio_files(arg_paths(env::args().skip(1), &cwd))); } }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running bootleg");
+        .build(tauri::generate_context!())
+        .expect("error while building bootleg")
+        .run(|_app, _event| {
+            // macOS hands files over as an Apple Event, at launch and while running
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event { receive_opened(_app, audio_files(urls.into_iter().filter_map(|u| u.to_file_path().ok()))); }
+        });
 }

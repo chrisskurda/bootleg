@@ -18,6 +18,7 @@ import { readTags } from '/lib/tags.js';
 import { Libraries, MODES } from '/lib/libraries.js';
 import { LibCache, NullCache } from '/lib/cache.js';
 import { makeNativeTagReader, AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
+import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -25,6 +26,7 @@ const TAURI = window.__TAURI__;
 const lib = new Library(), feed = new AudioFeed(), player = new Player(feed);
 const viz = new VizHost({ stage: $('#vizStage'), packSelect: $('#packSelect'), paramsEl: $('#packParams'), lookEl: $('#lookParams'), feed, player });
 function toast(msg, bad = false) { const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg); document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 3000); }
+const acts = playActions(player, { model: () => settings.playModel, toast, plural });       // what ▶ / double-click do (Settings → Playing)
 const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test mode: the shell injects this flag, and nothing below touches the real settings, library or notes
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
@@ -40,8 +42,8 @@ $$('.nav').forEach(b => b.onclick = () => show(b.dataset.view)); $('#np').onclic
 let shown = [];
 const cover = (url, cls = 'cover') => url ? h('img', { class: cls, src: url, alt: '', loading: 'lazy' }) : h('div', { class: cls + ' ph' }, '♪');
 function trackRow(t, i) {
-  return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => player.playList(shown, i) },
-    h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => player.playList(shown, i) }, '▶')),
+  return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(shown, i, true) },
+    h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => acts.now(shown, i, true) }, '▶')),
     h('span', { class: 'tt' }, t.title, t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
     h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
@@ -51,27 +53,52 @@ function renderTracks() {
   $('#emptyTracks').hidden = lib.visibleItems.length > 0; $('.thead').hidden = !lib.visibleItems.length;
 }
 // ---- albums: grid / list / cover flow
-let flowIdx = 0, openKey = null, listShown = null, gridLimit = 300;
-const albumVL = new VirtualList({ scroller: $('#albumList'), container: $('#albumListVc'), rowH: 52, render: a => { const i = albumInfo(a); return h('div', { class: 'arow' + (openKey === a.key ? ' sel' : ''), onclick: () => { openKey = a.key; renderAlbums(); }, ondblclick: () => player.playList(a.tracks, 0) },
+let flowIdx = 0, openKey = null, listShown = null, gridLimit = 300, gridKey = null;
+// Every album view shares one gesture: a click opens the album (shows its tracks) — or plays it, if Settings says so —
+// and a double-click opens and plays. The second click of a double-click (e.detail 2) is left to the dblclick handler.
+const albumGesture = (a, open) => ({
+  onclick: e => { if (e.detail > 1) return; open(a, e); if (settings.albumClick === 'play') acts.activate(a.tracks); },
+  ondblclick: e => { if (settings.albumClick === 'play') return; open(a, e, true); acts.activate(a.tracks); },
+});
+const albumVL = new VirtualList({ scroller: $('#albumList'), container: $('#albumListVc'), rowH: 52, render: a => { const i = albumInfo(a); return h('div', { class: 'arow' + (openKey === a.key ? ' sel' : ''), ...albumGesture(a, () => { openKey = a.key; renderAlbums(); }) },
   cover(a.coverUrl, 'cover sm'), h('span', { class: 'tt' }, a.album), h('span', { class: 'muted' }, a.artist || ''), h('span', { class: 'r muted' }, i.year || ''), h('span', { class: 'r muted' }, a.tracks.length), h('span', { class: 'r muted' }, i.dur ? hms(i.dur) : '')); } });
 const albumInfo = a => { const yrs = a.tracks.map(t => +t.year).filter(Boolean), dur = a.tracks.reduce((n, t) => n + (t.duration || 0), 0); return { year: yrs.length ? Math.min(...yrs) : '', dur }; };
 const hms = s => { s = Math.round(s); const hh = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return hh ? `${hh} h ${m} min` : `${m} min`; };
 function albumTracks(a) {
-  return h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), ondblclick: () => player.playList(a.tracks, i) },
+  return h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(a.tracks, i, true) },
     h('span', { class: 'n' }, String(t.track || i + 1)), h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist && t.artist !== a.artist ? t.artist : ''), h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''),
-    h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => player.playList(a.tracks, i) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')))));
+    h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')))));
 }
 function albumActions(a) {
-  return h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => player.playList(a.tracks, 0) }, '▶ Play album'),
-    h('button', { class: 'btn', onclick: () => player.playList(a.tracks.slice().sort(() => Math.random() - 0.5), 0) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'));
+  return h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play album'),
+    h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'));
 }
 function albumHead(a) { const i = albumInfo(a); return h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover big'), h('div', {}, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, i.year, plural(a.tracks.length, 'track'), i.dur ? hms(i.dur) : ''].filter(Boolean).join(' · ')), albumActions(a))); }
+// Grid: an opened album unfolds in a full-width panel under its row (the cards after it backfill the row — CSS
+// grid-auto-flow: dense), so the card you clicked stays where it was and a double-click lands on it again.
+function paintGrid(items) {
+  const open = items.find(a => a.key === gridKey); if (!open) gridKey = null; const out = [];
+  for (const a of items) {
+    out.push(h('div', { class: 'card' + (a === open ? ' sel' : ''), 'data-key': a.key, title: settings.albumClick === 'play' ? 'Play album' : 'Show tracks · double-click to play', ...albumGesture(a, openGridAlbum) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${plural(a.tracks.length, 'track')}`)));
+    if (a === open) out.push(h('div', { class: 'adetail ginline', role: 'region', 'aria-label': a.album }, h('button', { class: 'link gclose', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => { gridKey = null; renderAlbums(); } }, '✕'), albumHead(a), albumTracks(a)));
+  }
+  $('#albumGrid').replaceChildren(...out);
+}
+function openGridAlbum(a, e, keep = false) {
+  const scroller = $('#view-albums'), y0 = e?.currentTarget?.getBoundingClientRect().top;
+  gridKey = keep || gridKey !== a.key ? a.key : null; renderAlbums();          // a click on the open album folds it away
+  const card = $(`#albumGrid .card[data-key="${CSS.escape(a.key)}"]`); if (card && y0 != null) scroller.scrollTop += card.getBoundingClientRect().top - y0;   // a panel closing above must not move the card under the pointer
+  if (gridKey) setTimeout(() => {           // after the double-click window: then bring as much of the panel into view as fits, its top first
+    const p = $('#albumGrid .ginline'); if (!p) return; const r = p.getBoundingClientRect(), v = scroller.getBoundingClientRect();
+    if (r.bottom > v.bottom) scroller.scrollBy({ top: Math.min(r.bottom - v.bottom + 12, r.top - v.top - 8), behavior: 'smooth' });
+  }, 450);
+}
 function renderAlbums() {
   const mode = settings.albumView, q = $('#search').value.toLowerCase(), list = lib.albums().filter(a => !q || (a.album + ' ' + a.artist).toLowerCase().includes(q));
   $$('#albumMode button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode)); $('#albumGrid').hidden = mode !== 'grid'; $('#albumList').hidden = mode !== 'list'; $('#albumFlow').hidden = mode !== 'flow'; $('#albumSplit').hidden = mode !== 'split'; $('#emptyAlbums').hidden = list.length > 0;
   if (openKey && !list.some(a => a.key === openKey)) openKey = null;
   if (mode === 'split') { $('#albumDetail').hidden = true; renderSplit(list); return; }
-  if (mode === 'grid') { $('#albumDetail').hidden = true; if (list.length > gridLimit) { $('#albumGrid').dataset.more = '1'; } else delete $('#albumGrid').dataset.more; $('#albumGrid').replaceChildren(...list.slice(0, gridLimit).map(a => h('div', { class: 'card', title: 'Play album', onclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl), h('div', { class: 't' }, a.album), h('div', { class: 's' }, `${a.artist || ''}${a.artist ? ' · ' : ''}${plural(a.tracks.length, 'track')}`)))); return; }
+  if (mode === 'grid') { $('#albumDetail').hidden = true; if (list.length > gridLimit) { $('#albumGrid').dataset.more = '1'; } else delete $('#albumGrid').dataset.more; paintGrid(list.slice(0, gridLimit)); return; }
   if (mode === 'list') {
     if (!openKey) openKey = list[0]?.key; if (listShown !== list) { listShown = list; albumVL.setItems(list); } else albumVL.paint(true);
     const cur = list.find(x => x.key === openKey), det = $('#albumDetail'); det.hidden = !cur; if (cur) det.replaceChildren(albumHead(cur), albumTracks(cur));
@@ -90,7 +117,8 @@ function renderAlbums() {
   for (let i = Math.max(0, flowIdx - W); i <= Math.min(list.length - 1, flowIdx + W); i++) {
     const a = list[i], off = i - flowIdx, sgn = Math.sign(off); want.add(a.key); let el = stage._els.get(a.key);
     if (!el) { el = h('div', { class: 'fitem', title: a.album }, cover(a.coverUrl, 'fcover'), h('div', { class: 'frefl' })); stage._els.set(a.key, el); stage.append(el); if (a.coverUrl) el.querySelector('.frefl').style.backgroundImage = `url("${a.coverUrl}")`; el.style.transition = 'none'; }
-    el._i = i; el._a = a; el.onclick = () => { if (el._i === flowIdx) player.playList(el._a.tracks, 0); else { flowIdx = el._i; renderAlbums(); } }; el.classList.toggle('center', off === 0);
+    // a side cover comes to the centre; the centre one shows its tracks below (or plays, per Settings → Playing)
+    el._i = i; el._a = a; Object.assign(el, albumGesture(a, () => { if (el._i !== flowIdx) { flowIdx = el._i; renderAlbums(); } else $('#albumDetail').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); })); el.classList.toggle('center', off === 0);
     el.style.transform = off === 0 ? 'translate3d(-50%, 0, 60px)' : `translate3d(calc(-50% + ${sgn * 150 + off * 64}px), 0, ${-Math.abs(off) * 40}px) rotateY(${-sgn * 58}deg)`; el.style.zIndex = String(100 - Math.abs(off)); el.style.opacity = String(Math.max(0.15, 1 - Math.abs(off) * 0.11));
     if (el.style.transition === 'none') requestAnimationFrame(() => requestAnimationFrame(() => { el.style.transition = ''; }));
   }
@@ -102,7 +130,7 @@ function renderAlbums() {
 
 // ---- split view: album list on the left; cover, merged details, album notes and tracks on the right
 let splitKey = null, splitToken = 0;
-const splitVL = new VirtualList({ scroller: $('#splitList'), container: $('#splitVc'), rowH: 54, render: a => h('div', { class: 'srow2' + (a.key === splitKey ? ' sel' : ''), onclick: () => { splitKey = a.key; splitVL.paint(true); paintSplitPane(); }, ondblclick: () => player.playList(a.tracks, 0) }, cover(a.coverUrl, 'cover sm'), h('div', { class: 'stext' }, h('div', { class: 'tt' }, a.album), h('div', { class: 'muted small' }, [a.artist, albumInfo(a).year].filter(Boolean).join(' · ')))) });
+const splitVL = new VirtualList({ scroller: $('#splitList'), container: $('#splitVc'), rowH: 54, render: a => h('div', { class: 'srow2' + (a.key === splitKey ? ' sel' : ''), ...albumGesture(a, () => { if (splitKey === a.key) return; splitKey = a.key; splitVL.paint(true); paintSplitPane(); }) }, cover(a.coverUrl, 'cover sm'), h('div', { class: 'stext' }, h('div', { class: 'tt' }, a.album), h('div', { class: 'muted small' }, [a.artist, albumInfo(a).year].filter(Boolean).join(' · ')))) });
 let splitShown = null;
 function renderSplit(list) {
   const pane = $('#splitPane'); if (!list.length) { splitVL.setItems([]); pane.replaceChildren(); return; }
@@ -112,7 +140,7 @@ function renderSplit(list) {
 }
 async function paintSplitPane(list = lib.albums().filter(a => { const q = $('#search').value.toLowerCase(); return !q || (a.album + ' ' + a.artist).toLowerCase().includes(q); })) {
   const a = list.find(x => x.key === splitKey); if (!a) return; const tok = ++splitToken;
-  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, trackStore: t => notes.store.get(trackKey(t)) });
+  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, trackStore: t => notes.store.get(trackKey(t)) });
   if (tok === splitToken) { const pane = $('#splitPane'), keep = pane.scrollTop; pane.replaceChildren(el); pane.scrollTop = keep; }
 }
 $('#view-albums').addEventListener('scroll', () => { const v = $('#view-albums'); if (settings.albumView === 'grid' && $('#albumGrid').dataset.more && v.scrollTop + v.clientHeight > v.scrollHeight - 700) { gridLimit += 300; renderAlbums(); } }, { passive: true });
@@ -120,7 +148,7 @@ $$('#albumMode button').forEach(b => { b.onclick = () => { settings.albumView = 
 
 function renderRenders() {
   const list = lib.search(lib.visibleRenders, $('#search').value);
-  $('#renderList').replaceChildren(...list.map(r => h('div', { class: 'rcard', onclick: () => player.playList([r], 0) }, cover(r.coverUrl), h('div', {}, h('div', { class: 'big' }, r.title),
+  $('#renderList').replaceChildren(...list.map(r => h('div', { class: 'rcard', onclick: () => acts.activate([r]) }, cover(r.coverUrl), h('div', {}, h('div', { class: 'big' }, r.title),
     h('div', { class: 'muted small' }, [r.artist, r.bpm && Math.round(r.bpm) + ' BPM', r.key, r.duration && fmt(r.duration)].filter(Boolean).join(' · ')),
     h('div', { class: 'badges' }, h('span', { class: 'badge ok' }, `${r.stems.length} stems`), r.sections.length ? h('span', { class: 'badge' }, `${r.sections.length} sections`) : null, r.clipsSrc ? h('span', { class: 'badge' }, 'sample labels') : null)))));
   $('#emptyRenders').hidden = list.length > 0;
@@ -139,7 +167,7 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -225,6 +253,17 @@ if (TAURI?.event) TAURI.event.listen('tauri://drag-drop', async ev => {
   document.body.classList.remove('drop'); const sources = []; for (const p of ev.payload.paths || []) { try { const st = await TAURI.fs.stat(p); if (st.isDirectory) sources.push(...await scanFolder(p)); else sources.push(...await sourcesFromPathsTauri([p])); } catch (err) { toast(String(err), true); } } addSources(sources, 'Dropped');
 });
 
+// Files opened from the OS (Finder/Explorer “Open With”, bootleg as the default player, `bootleg song.flac`): the shell keeps
+// them in an inbox until the page takes them. They join this session's library (so tags, cover and notes work, and a file
+// already in the library is that same track) and play straight away, as ▶ does.
+async function openFromOS() {
+  const paths = await TAURI.core.invoke('take_opened'); if (!paths.length) return;
+  lib.add(await sourcesFromPathsTauri(paths), libs.target().id);
+  const items = paths.map(p => { const t = lib._byPath.get(p); return t && t.kind === 'track' ? t : lib.renders.find(r => r.mix?.path === p); }).filter(Boolean);
+  if (items.length) { await acts.now(items); renderAll(); } else toast('bootleg could not open that file', true);
+}
+if (TAURI?.event && !SELF) TAURI.event.listen('bootleg://opened', () => openFromOS().catch(e => toast(String(e), true)));
+
 // ------------------------------------------------------------------ player bar
 const playBtn = $('#play'), seek = $('#seek');
 function updateBar() {
@@ -283,6 +322,7 @@ $('#fsBtn').onclick = () => viz.fullscreen(); $('#lookReset').onclick = () => vi
 addEventListener('keydown', e => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'range' && document.activeElement.type !== 'checkbox';
   if (e.key === '/' && !typing) { e.preventDefault(); $('#search').focus(); return; } if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
+  if (e.key === 'Escape' && view === 'albums' && gridKey) { gridKey = null; renderAlbums(); return; }
   if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
   else if (view === 'albums' && settings.albumView === 'flow' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { flowIdx += e.key === 'ArrowRight' ? 1 : -1; renderAlbums(); }
   else if (e.key === 'ArrowRight') { e.shiftKey ? player.next() : player.seek(player.pos() + 5); } else if (e.key === 'ArrowLeft') { e.shiftKey ? player.prev() : player.seek(player.pos() - 5); }
@@ -329,6 +369,7 @@ async function paintSettings() {
   const box = $('#settingsBody'), st = await cache.stats(), row = (label, hint, input) => h('label', { class: 'srow' }, h('span', {}, h('b', {}, label), hint ? h('small', {}, hint) : ''), input);
   const chk = k => h('input', { type: 'checkbox', checked: !!settings[k], onchange: e => { settings[k] = e.target.checked; applySettings(); } });
   const num = (k, min, max) => h('input', { type: 'number', min, max, value: settings[k], onchange: e => { settings[k] = Math.max(min, Math.min(max, +e.target.value || 0)); applySettings(); } });
+  const pick = (k, opts, then = () => {}) => h('select', { id: 'set-' + k, onchange: e => { settings[k] = e.target.value; applySettings(); then(); } }, ...Object.entries(opts).map(([v, l]) => h('option', { value: v, selected: settings[k] === v }, l)));
   const libCards = libs.list.map(L => h('div', { class: 'lib-card' },
     h('div', { class: 'lib-head' }, h('input', { value: L.name, 'aria-label': 'Library name', onchange: e => { libs.update(L.id, { name: e.target.value }); paintLibSel(); } }),
       h('select', { 'aria-label': 'Mode', onchange: e => { libs.update(L.id, { mode: e.target.value }); paintLibSel(); notes.refresh(); } }, ...Object.entries(MODES).map(([k, m]) => h('option', { value: k, selected: k === L.mode }, m.label))),
@@ -343,6 +384,10 @@ async function paintSettings() {
     h('h3', {}, 'Libraries'), ...libCards,
     h('div', { class: 'lib-head' }, newName, newMode, h('button', { class: 'btn primary', id: 'newLibBtn', onclick: () => { const l = libs.add(newName.value, newMode.value); libs.setActive(l.id); lib.scope = l.id; paintLibSel(); renderAll(); paintSettings(); } }, 'Create library')),
     h('div', { class: 'muted small' }, 'Notes, ratings and tags belong to the recording, so they follow it across libraries. A library’s mode only chooses which fields and tools are offered.'),
+    h('h3', {}, 'Playing'),
+    row('Clicking an album', 'In every album view. A double-click always plays the album and shows its tracks.', pick('albumClick', ALBUM_CLICKS, () => { gridKey = null; })),
+    row('Play and double-click', 'Replace: the album, playlist or list you play becomes the queue. Build a queue: the queue is only ever added to — double-click adds to the end (playing at once if nothing is), ▶ plays straight away and keeps the rest. The “next” and “+ queue” buttons work the same in both.', pick('playModel', PLAY_MODELS)),
+    TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
     h('h3', {}, 'Library scanning'),
     row('Remember the library (cache)', 'Tags, covers and the file list are kept on this device, so the library appears instantly next time. Takes effect after a restart.', chk('cacheEnabled')),
     row('Check for changes on startup', TAURI ? 'Looks for added, changed and removed files in the background.' : 'Desktop app only — a browser cannot see the disk without being given files.', chk('scanOnStart')),
@@ -413,7 +458,7 @@ async function saveText(name, text, mime, fullPath) {
   if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: fullPath || name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
-const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $ });
+const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: ts => acts.now(ts) });
 
 // ------------------------------------------------------------------ desktop self-test (BOOTLEG_SELFTEST=<music dir> BOOTLEG_SELFTEST_OUT=<file>): proves the packaged app can scan, tag, stream and analyse real files
 async function selfTest(dir) {
@@ -455,6 +500,7 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
   await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {}), window.__BOOTLEG_SELFTEST ? null : extensions.init()]);
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
+  else if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
   window.__bootleg = { extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

@@ -27,7 +27,17 @@ export class Player extends EventTarget {
   // ---- queue
   _rebuild() { const idx = this.queue.map((_, i) => i); if (this.shuffle) { for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; } const k = idx.indexOf(this.index); if (k > 0) { idx.splice(k, 1); idx.unshift(this.index); } } this.order = idx; }
   async playList(items, start = 0) { this.queue = items.slice(); this.index = Math.max(0, Math.min(start, items.length - 1)); this._rebuild(); await this._playCurrent(); }
-  enqueue(items, next = false) { const at = next ? this.index + 1 : this.queue.length; this.queue.splice(at, 0, ...items); if (this.index < 0) { this.index = 0; this._rebuild(); this._playCurrent(); return; } this._rebuild(); this._emit(); }
+  // Adds to the queue. Starts playing (and returns true) when there was nothing to continue: an empty queue, or one that ran out.
+  enqueue(items, next = false) {
+    if (!items.length) return false; const at = next ? this.index + 1 : this.queue.length; this.queue.splice(at, 0, ...items);
+    if (this.index < 0 || this.ended) { this.index = this.index < 0 ? 0 : at; this._rebuild(); this._playCurrent(); return true; }
+    this._rebuild(); this._emit(); return false;
+  }
+  // Plays these at once without throwing the queue away: they go in after the current track, the first of them starts.
+  async playNow(items, start = 0) {
+    if (!items.length) return; if (this.index < 0 || !this.queue.length) return this.playList(items, start);
+    const at = this.index + 1; this.queue.splice(at, 0, ...items); this.index = at + Math.max(0, Math.min(start, items.length - 1)); this._rebuild(); await this._playCurrent();
+  }
   remove(i) { if (i === this.index) { this.queue.splice(i, 1); this.index = Math.min(i, this.queue.length - 1); this._rebuild(); if (this.index >= 0) this._playCurrent(); else this.stop(); return; } this.queue.splice(i, 1); if (i < this.index) this.index--; this._rebuild(); this._emit(); }
   clear() { this.stop(); this.queue = []; this.index = -1; this.order = []; this._emit(); }
   setShuffle(v) { this.shuffle = v; this._rebuild(); this._emit(); }
@@ -35,7 +45,7 @@ export class Player extends EventTarget {
   async jump(i) { this.index = i; this._rebuild(); await this._playCurrent(); }
 
   // ---- transport
-  async _playCurrent() { const item = this.item; if (!item) return; await this._load(item); if (this.item === item) this.play(); }
+  async _playCurrent() { const item = this.item; if (!item) return; this.ended = false; await this._load(item); if (this.item === item) this.play(); }
   // A stem set plays from its mix straight away (one file, instant start). Its stems are decoded only when wanted — the stem
   // mixer, a stem-aware visualizer, or the "always" setting — and then take over seamlessly at the current position.
   async _load(item) {
@@ -97,7 +107,7 @@ export class Player extends EventTarget {
   prev() { if (this.pos() > 3) this.seek(0); else this._step(-1, false); }
   _step(dir, natural) {
     if (!this.queue.length) return; let p = this.order.indexOf(this.index) + dir;
-    if (p >= this.order.length) { if (this.repeat === 'all' || !natural) p = 0; else { this.stop(); return; } } if (p < 0) p = this.order.length - 1;
+    if (p >= this.order.length) { if (this.repeat === 'all' || !natural) p = 0; else { this.ended = true; this.stop(); return; } } if (p < 0) p = this.order.length - 1;
     this.index = this.order[p]; this._playCurrent();
   }
   _ended() { if (this.repeat === 'one') { this.seek(0); this.play(); } else this._step(1, true); }

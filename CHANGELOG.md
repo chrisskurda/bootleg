@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **Settings → Playing**: choose what clicking an album does (show its tracks — the new default — or play it), and how playing treats the queue: *replace* (the album, playlist or list becomes the queue; as before) or *build a queue* (double-click adds to the end and starts if nothing is playing; ▶ plays now, inserted after the current track, keeping the rest).
+- Album grid: a click unfolds the album's tracks in a panel under its row (Esc or ✕ closes it); a double-click plays it and keeps the tracks open. List, cover flow and split views follow the same click / double-click rule.
+- Desktop: open audio files from Finder or Explorer (“Open With → bootleg”, or bootleg as the default player) or the command line; they play straight away, even on a cold start. bootleg registers as an alternate handler for mp3, flac, m4a/aac, ogg/opus, wav, aiff and caf, so it never takes over the default player on its own. On Windows and Linux a second launch hands its files to the running app.
 - README screenshots, a synthetic demo library (`npm run demo-library`) and a script that drives the app to capture them (`npm run screenshots`).
 
 ### Changed

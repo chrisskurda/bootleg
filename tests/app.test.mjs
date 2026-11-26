@@ -45,6 +45,28 @@ try {
   if (shots) await pg.screenshot({ path: path.join(shots, 'albums-flow.png') });
   await pg.click('#albumDetail .btn.primary'); await pg.waitForFunction(() => window.__bootleg.player.playing); t('Play album in the detail panel plays', true); await pg.click('#next'); await pg.click('#albumMode button[data-mode="grid"]'); await pg.click('#albumMode button[data-mode="flow"]');
   t('the chosen album view is remembered', (await ev(() => JSON.parse(localStorage.getItem('bootleg.settings')).albumView)) === 'flow'); await pg.click('#albumMode button[data-mode="grid"]');
+
+  // ---- album gestures and the two play models (Settings → Playing)
+  const B = 'window.__bootleg.player', pl = f => ev(new Function(`const p = ${B}; return (${f})(p);`)), funk = () => pg.locator('#albumGrid .card', { hasText: 'Funk Report' });
+  await pl('p => p.clear()'); await funk().click(); await pg.waitForSelector('#albumGrid .ginline .atrack');
+  t('by default a click on an album shows its tracks in a panel under its row, and plays nothing', (await pg.locator('#albumGrid .ginline .atrack').count()) === 2 && !(await pl('p => p.item')));
+  await funk().dblclick(); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.queue.length === 2);
+  t('a double-click plays the album and leaves its tracks open', await pg.locator('#albumGrid .ginline').isVisible() && (await pl('p => p.item.album')) === 'Funk Report');
+  await pg.keyboard.press('Escape'); t('Escape folds the album panel away', (await pg.locator('#albumGrid .ginline').count()) === 0);
+  await pg.click('.nav[data-view="settings"]'); await pg.selectOption('#set-albumClick', 'play'); await pg.click('.nav[data-view="albums"]'); await pl('p => p.clear()');
+  await pg.locator('#albumGrid .card', { hasText: 'Forecast' }).click(); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Low Pressure');
+  t('with “Clicking an album: plays it”, one click plays', (await pl('p => p.queue.length')) === 1);
+  await pg.click('.nav[data-view="settings"]'); await pg.selectOption('#set-albumClick', 'open'); await pg.selectOption('#set-playModel', 'queue');
+  t('the play settings are remembered', (await ev(() => JSON.parse(localStorage.getItem('bootleg.settings')))).playModel === 'queue');
+  await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row', { hasText: 'Second Quarter' }).dblclick(); await sleep(300);
+  t('build-a-queue: a double-click adds the track to the end; the current track keeps playing', (await pl('p => p.queue.map(x => x.title).join()')) === 'Low Pressure,Second Quarter' && (await pl('p => p.item.title')) === 'Low Pressure');
+  const caf = pg.locator('#trackList .row', { hasText: 'Café' }); await caf.hover(); await caf.locator('button.pl').click(); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Café Ünïcødé');
+  t('build-a-queue: ▶ plays now, inserted after the current track, and nothing is dropped', (await pl('p => p.queue.map(x => x.title).join()')) === 'Low Pressure,Café Ünïcødé,Second Quarter');
+  await pl('p => { p.setRepeat("off"); p.setShuffle(false); p.next(); }'); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Second Quarter' && window.__bootleg.player.dur() > 1);
+  await pl('p => p.seek(p.dur() - 0.4)'); await pg.waitForFunction(() => window.__bootleg.player.ended, null, { timeout: 8000 });
+  await pg.locator('#trackList .row', { hasText: 'Low Pressure' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.item?.title === 'Low Pressure' && window.__bootleg.player.index === 3);
+  t('build-a-queue: adding to a queue that has run out starts playing what was added', true);
+  await pg.click('.nav[data-view="settings"]'); await pg.selectOption('#set-playModel', 'replace'); await pl('p => p.clear()'); await pg.click('.nav[data-view="albums"]');
   await pg.click('.nav[data-view="renders"]'); t('renders view lists the stem render with its stem count', (await pg.locator('#renderList .rcard').innerText()).includes('5 stems'));
   await pg.click('.nav[data-view="tracks"]'); await pg.fill('#search', 'ünï'); await pg.waitForFunction(() => document.querySelectorAll('#trackList .row').length === 1 && document.querySelector('#trackList .row').textContent.includes('Caf')); const sr = await pg.locator('#trackList .row').textContent(); t('search narrows the list (substring, case-insensitive)', sr.includes('Caf'), JSON.stringify(sr)); await pg.fill('#search', '');
   await pg.waitForFunction(() => document.querySelectorAll('#trackList .row').length === 3);
