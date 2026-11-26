@@ -38,6 +38,10 @@ await play('Night Garden'); await pg.click('.nav[data-view="viz"]'); await pg.se
 await pg.click('.nav[data-view="now"]'); await pg.waitForSelector('#tlSpec.on', { timeout: 30000 }); await sleep(4000); await shot('now-playing');
 // 4. the timeline with its note callouts, and the notes editor under it (a taller window so both fit)
 await tall(1200); await ev(() => { const v = document.querySelector('#view-now'); v.scrollTop = document.getElementById('timeline').offsetTop - 20; }); await sleep(600); await shot('notes'); await normal();
+// 4b. the notes feed and the playlists list
+await pg.click('.nav[data-view="notes"]'); await pg.waitForSelector('#noteCards .ncard'); await sleep(500); await shot('feed');
+await ev(async () => { const B = window.__bootleg, ts = B.lib.sortedTracks().slice(0, 7); await B.notes.store.savePlaylist({ name: 'Late night drive', items: ts.map(t => (t.kind === 'render' ? 'render:' + t.dir : 'file:' + t.src.path + '#' + t.src.size)) }); await B.notes.store.savePlaylist({ name: 'Sunday morning', items: ts.slice(3).map(t => (t.kind === 'render' ? 'render:' + t.dir : 'file:' + t.src.path + '#' + t.src.size)) }); });
+await pg.click('.nav[data-view="playlists"]'); await pg.waitForSelector('#plList .ncard'); await pg.locator('#plList .ncard', { hasText: 'Late night drive' }).locator('.pltoggle').click(); await sleep(400); await shot('playlists');
 // 5. a stem set: mix-first, stems loaded for a stem-aware visualizer, with the live mixer
 await tall(1100); await pg.evaluate(async () => { const B = window.__bootleg; await B.player.playList([B.lib.renders[0]], 0); }); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'stem-rack'); await pg.click('.nav[data-view="now"]');
 await ev(() => { document.getElementById('notesPanel').style.display = 'none'; });

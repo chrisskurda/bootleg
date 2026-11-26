@@ -26,6 +26,7 @@ import { initNowView } from '/lib/now-view.js';
 import { VizDock } from '/lib/viz-dock.js';
 import { ListenHeat, SpectroCache, IdbKV, MapKV } from '/lib/listen-heat.js';
 import { MiniHost } from '/lib/mini-host.js';
+import { SHARE_DEFAULTS } from '/lib/share.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -184,7 +185,6 @@ function renderAll() {
   const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length, vi = lib.visibleItems.length; $('#nTracks').textContent = vi || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
   if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders();
   const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${plural(vt, 'track')} · ${plural(vr, 'stem set')}` : '';
-  $('#forget').hidden = !scopeRoots().length;
 }
 // while tags stream in, redraw less often (each redraw of a big library is work a weaker machine can't spare)
 let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTimer = setTimeout(() => { rTimer = 0; renderAll(); }, lib._q.length + lib._busy ? 900 : 200); });
@@ -193,7 +193,7 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { ...PLAY_DEFAULTS, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -227,7 +227,7 @@ $('#folderIn').onchange = e => { addSources(sourcesFromFiles(e.target.files), 'S
 $('#filesIn').onchange = e => { addSources(sourcesFromFiles(e.target.files)); e.target.value = ''; };
 const scopeRoots = () => { const ls = libs.active === 'all' ? libs.list : [libs.get(libs.active)].filter(Boolean); return ls.flatMap(L => [...L.roots, ...L.connections]).map(x => ({ root: x })); };
 async function forgetLibrary(L) { for (const c of [...L.connections]) { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); } for (const r of [...L.roots]) { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); } lib.dropLibrary(L.id); }
-$('#forget').onclick = async () => { const targets = libs.active === 'all' ? libs.list : [libs.get(libs.active)]; for (const L of targets) await forgetLibrary(L); player.clear(); renderAll(); paintLibSel(); toast(libs.active === 'all' ? 'All libraries forgotten' : 'Library forgotten'); };
+const forgetActive = async () => { const targets = libs.active === 'all' ? libs.list : [libs.get(libs.active)]; for (const L of targets) await forgetLibrary(L); player.clear(); renderAll(); paintLibSel(); toast(libs.active === 'all' ? 'All libraries forgotten' : 'Library forgotten'); };
 function paintLibSel() {
   const sel = $('#libSel'); sel.replaceChildren(...libs.list.map(l => h('option', { value: l.id, selected: l.id === libs.active }, `${l.name}${l.mode === 'studio' ? ' ✎' : ''}`)), libs.list.length > 1 ? h('option', { value: 'all', selected: libs.active === 'all' }, 'All libraries') : null); sel.hidden = false; sel.value = libs.active;
 }
@@ -456,6 +456,14 @@ async function paintSettings() {
     row('Mini visualizer while browsing', 'Keeps the visualizer in the corner on the other pages (the ▭ button on the visualizer does the same).', h('input', { type: 'checkbox', id: 'set-vizFloat', checked: !!settings.vizFloat, onchange: e => { settings.vizFloat = e.target.checked; applySettings(); placeViz(); } })),
     TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
     ...(tagFiles ? tagFileSettings(row, chk, num) : []),
+    h('h3', {}, 'Notes and data'),
+    row('Export notes', 'Everything you wrote and rated — notes, ratings, tags, provenance, tag edits and playlists — as one JSON file.', h('button', { class: 'btn', id: 'notesExport', onclick: () => notes.exportNotes() }, 'Export notes…')),
+    row('Import notes', 'Merges a bootleg notes file into yours; nothing you have is overwritten with older data.', h('button', { class: 'btn', id: 'notesImport', onclick: () => notes.importNotes() }, 'Import notes…')),
+    scopeRoots().length ? row('Forget this library’s folders', 'Removes the folders and servers of ' + (libs.active === 'all' ? 'every library' : 'this library') + ' from bootleg (and its cache). Your files are untouched and your notes are kept.', h('button', { class: 'btn', id: 'forget', onclick: async () => { await forgetActive(); paintSettings(); } }, 'Forget…')) : '',
+    h('h3', {}, 'Posting notes'),
+    row('Add #nowplaying #bootleg', 'Ends each post with these tags.', chk('shareTags')),
+    row('Add a link to bootleg', 'Ends each post with a link to bootleg’s page.', chk('shareLink')),
+    row('Your Mastodon server', 'Where “Mastodon” opens the post, e.g. mastodon.social.', h('input', { type: 'text', value: settings.mastodon || '', placeholder: 'mastodon.social', onchange: e => { settings.mastodon = e.target.value.trim() || SHARE_DEFAULTS.mastodon; applySettings(); } })),
     h('h3', {}, 'Library scanning'),
     row('Remember the library (cache)', 'Tags, covers and the file list are kept on this device, so the library appears instantly next time. Takes effect after a restart.', chk('cacheEnabled')),
     row('Check for changes on startup', TAURI ? 'Looks for added, changed and removed files in the background.' : 'Desktop app only — a browser cannot see the disk without being given files.', chk('scanOnStart')),
@@ -540,7 +548,7 @@ async function saveText(name, text, mime, fullPath) {
   if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: fullPath || name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
-const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: ts => acts.now(ts) });
+const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: (ts, i = 0) => acts.now(ts, i), shareOpts: () => settings });
 let nowKV; try { nowKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV(); } catch { nowKV = new MapKV(); }
 const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fmt, $, editTags, heat: new ListenHeat(nowKV), spectros: new SpectroCache(nowKV), isShown: () => view === 'now',
   connTitle: id => libs.allConnections().find(c => c.conn.id === id)?.conn.title || '', spectroMode: () => settings.spectro,
@@ -595,7 +603,11 @@ async function selfTest(dir) {
       const back = await lib.nativeReader(lt.src.path); out.tagWrite = res.length === 1 && res[0].ok && back?.title === 'Self Test Edited' && String(back?.year) === '1999' && trackKey(lt) !== k0; if (!out.tagWrite) out.tagWriteDiag = JSON.stringify({ res: res.map(r => r.error || r.path), back: back && { title: back.title, year: back.year } });
     }
     // minimizing the main window brings up the mini player, which connects back to the player; restoring puts it away
-    try { await TAURI.core.invoke('selftest_minimize', { on: true }); await wait(() => mini.alive, 12000); out.miniOnMinimize = true; mini.cmd({ cmd: 'volume', to: 0.5 }); await TAURI.core.invoke('selftest_minimize', { on: false }); await wait(() => !mini.alive, 12000); out.miniClosed = true; } catch (e) { out.miniDiag = String(e?.message || e); }
+    // (a display with no window manager — CI's virtual one — cannot minimize: then the window is opened directly)
+    try {
+      await TAURI.core.invoke('selftest_minimize', { on: true }); try { await wait(() => mini.alive, 8000); out.miniOnMinimize = true; } catch { await TAURI.core.invoke('mini_open'); await wait(() => mini.alive, 12000); }
+      out.miniWindow = true; mini.cmd({ cmd: 'volume', to: 0.5 }); await TAURI.core.invoke('selftest_minimize', { on: false }); if (!out.miniOnMinimize) await TAURI.core.invoke('mini_close'); await wait(() => !mini.alive, 12000); out.miniClosed = true;
+    } catch (e) { out.miniDiag = String(e?.message || e); }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }

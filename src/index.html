@@ -34,7 +34,6 @@
       <button class="nav" data-view="viz">Visualizer</button>
       <div id="extNav" class="extnav" hidden></div>
       <button class="nav" data-view="settings">Settings</button>
-      <div class="side-foot"><button id="notesExport" class="link">Export notes…</button><button id="notesImport" class="link">Import notes…</button><button id="forget" class="link" hidden>Forget library</button></div>
     </nav>
 
     <main id="main">
@@ -49,12 +48,12 @@
       <section id="view-renders" class="view" hidden><div id="renderList" class="cards"></div><div id="emptyRenders" class="empty">No stem sets yet. Add a folder with a <code>stems/</code> folder (the bootleg stem format) to mute, solo and watch each stem.</div></section>
 
       <section id="view-notes" class="view" hidden>
-        <div class="toolbar"><input id="noteSearch" type="search" placeholder="Search notes, tags, provenance…"><select id="noteTag" aria-label="Tag"><option value="">any tag</option></select><select id="noteStatus" aria-label="Status"><option value="">any status</option><option>idea</option><option>draft</option><option>mixing</option><option>mastered</option><option>released</option></select><label class="muted">Rating ≥ <select id="noteMin"><option value="0">any</option><option value="3">3</option><option value="4">4</option><option value="4.5">4.5</option><option value="5">5</option></select></label></div>
-        <div id="noteCards" class="cards"></div><div id="emptyNotes" class="empty"><b>No notes yet.</b><br>Rate a track, or open <i>Now playing</i> and add notes — at a moment in the song, over a range, or about the whole recording. Record where it came from: vinyl rip, CD, live recording, device, date.</div>
+        <div class="toolbar"><input id="noteSearch" type="search" placeholder="Search notes, tags, provenance…"><select id="noteTag" aria-label="Tag"><option value="">any tag</option></select><select id="noteStatus" aria-label="Status"><option value="">any status</option><option>idea</option><option>draft</option><option>mixing</option><option>mastered</option><option>released</option></select><label class="muted">Rating ≥ <select id="noteMin"><option value="0">any</option><option value="3">3</option><option value="4">4</option><option value="4.5">4.5</option><option value="5">5</option></select></label><button id="feedShare" class="btn" title="Copy or save the feed (as filtered) as Markdown">↗ Share feed…</button></div>
+        <div id="noteCards" class="cards feed"></div><div id="emptyNotes" class="empty"><b>No notes yet.</b><br>Rate a track, or open <i>Now playing</i> and add notes — at a moment in the song, over a range, or about the whole recording. Record where it came from: vinyl rip, CD, live recording, device, date.</div>
       </section>
       <section id="view-playlists" class="view" hidden>
-        <div class="toolbar"><input id="plName" placeholder="Name for the current queue…"><button id="plSave" class="btn primary">Save queue as playlist</button><button id="plImport" class="btn">Import M3U…</button></div>
-        <div id="plList" class="cards"></div><div id="emptyPl" class="empty">No playlists yet. Fill the queue, name it above and save — or import an .m3u / .m3u8 from another player.</div>
+        <div class="toolbar"><input id="plName" placeholder="Name for the current queue…"><button id="plSave" class="btn primary">Save queue as playlist</button><button id="plImport" class="btn">Import M3U…</button><label id="plHidden" class="muted" hidden><input type="checkbox" id="plShowHidden"> show hidden (<span id="plHiddenN"></span>)</label></div>
+        <div id="plList" class="cards feed"></div><div id="emptyPl" class="empty">No playlists yet. Fill the queue, name it above and save — or import an .m3u / .m3u8 from another player.</div>
       </section>
 
       <section id="view-settings" class="view" hidden><div id="settingsBody" class="settings"></div></section>

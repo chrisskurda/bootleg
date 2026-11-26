@@ -2,6 +2,7 @@
 import { parseNfo, buildAlbumNfo, nfoRatingToStars } from './nfo.js';
 import { MODES, STATUSES } from './libraries.js';
 import { albumKey } from './album-details.js';
+import { openShare, feedMarkdown, SHARE_DEFAULTS } from './share.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
 // A server track's id is stable across tag edits, so its key leaves the size out (writing tags changes the size). A local
@@ -20,7 +21,7 @@ export function stars(h, value, onset) {
   return el;
 }
 
-export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $, playNow = ts => player.playList(ts, 0) }) {
+export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $, playNow = (ts, i = 0) => player.playList(ts, i), shareOpts = () => SHARE_DEFAULTS }) {
   const drafts = new Map(); let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
   libs.onchange = () => paint(); $('#notesPanel').addEventListener('focusout', () => setTimeout(() => { if (pendingPaint) paint(); }, 0));
@@ -96,7 +97,7 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
     const view = () => row.replaceChildren(
       n.at != null ? h('button', { class: 'chip time', title: 'Jump here', onclick: () => player.seek(n.at) }, fmt(n.at) + (n.to != null ? '–' + fmt(n.to) : '')) : h('span', { class: 'chip' }, 'whole'),
       n.kind && n.kind !== 'note' ? h('span', { class: 'chip kind' }, n.kind) : '', h('span', { class: 'ntext' }, n.text),
-      h('span', { class: 'nacts' }, h('button', { class: 'mini', onclick: edit }, 'edit'), h('button', { class: 'mini', onclick: () => store.removeNote(curKey, n.id) }, '✕')));
+      h('span', { class: 'nacts' }, h('button', { class: 'mini', title: 'Post this note (Bluesky, Mastodon, …)', onclick: () => share(player.item, n, cur?.rating) }, 'share'), h('button', { class: 'mini', onclick: edit }, 'edit'), h('button', { class: 'mini', onclick: () => store.removeNote(curKey, n.id) }, '✕')));
     const edit = () => { const i = h('textarea', { rows: 2 }, n.text); i.value = n.text; row.replaceChildren(i, h('button', { class: 'mini', onclick: () => store.editNote(curKey, n.id, { text: i.value.trim() || n.text }) }, 'save'), h('button', { class: 'mini', onclick: view }, 'cancel')); i.focus(); };
     view(); return row;
   }
@@ -104,23 +105,76 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
 
   // ---- Notes browser: everything annotated, across the library
   const byKey = () => { const m = new Map(); for (const t of [...lib.tracks, ...lib.renders]) m.set(trackKey(t), t); for (const a of lib.albums()) m.set(albumKey(a), { title: a.album, artist: a.artist, album: 'album', tracks: a.tracks, isAlbum: true }); return m; };
+  const share = (t, n, rating) => openShare({ text: n?.text || '', at: n?.at ?? null, rating: n ? 0 : rating, track: t ? { title: t.title, artist: t.artist } : null }, { h, opts: shareOpts(), toast, title: n ? 'Post this note' : 'Post this track' });
+  // Play a recording from a moment: seek once it has loaded.
+  async function playAt(t, at) { if (!t) return; if (player.item !== t) await playNow(t.isAlbum ? t.tracks : [t], 0); if (at != null && !t.isAlbum) player.seek(at); }
+  const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem('bootleg.' + k)) ?? d; } catch { return d; } }, lsSet = (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } };
+  const open = new Set(), expanded = new Set(); let showHidden = false, feedItems = [], listsPending = false;
+  const cover = t => { const u = t?.coverUrl || t?.tracks?.[0]?.coverUrl; return u ? h('img', { class: 'fcover', src: u, alt: '', loading: 'lazy' }) : h('div', { class: 'fcover ph' }, '♪'); };
+  const when = ms => ms ? new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+  // one note in the feed: its moment (plays from there), the text (long ones fold), and edit / post / delete
+  function feedNote(r, t, n) {
+    const row = h('div', { class: 'fnote' }), id = r.key + '|' + n.id;
+    const view = () => {
+      const long = n.text.length > 280 || n.text.split('\n').length > 4, txt = h('div', { class: 'ftext' + (long && !expanded.has(id) ? ' clamp' : '') }, n.text);
+      row.replaceChildren(
+        h('div', { class: 'fmeta' }, n.at != null ? h('button', { class: 'chip time', title: 'Play from here', onclick: () => playAt(t, n.at) }, fmt(n.at) + (n.to != null ? '–' + fmt(n.to) : '')) : h('span', { class: 'chip' }, 'whole recording'), n.kind && n.kind !== 'note' ? h('span', { class: 'chip kind' }, n.kind) : '', h('span', { class: 'muted small' }, when(n.created))),
+        txt, long ? h('button', { class: 'link small', onclick: () => { expanded.has(id) ? expanded.delete(id) : expanded.add(id); view(); } }, expanded.has(id) ? 'show less' : 'show more') : '',
+        h('div', { class: 'facts2' }, h('button', { class: 'mini', onclick: () => share(t || { title: r.key }, n) }, '↗ post'), h('button', { class: 'mini', onclick: edit }, 'edit'), h('button', { class: 'mini', onclick: () => store.removeNote(r.key, n.id) }, 'delete')));
+    };
+    const edit = () => { const ta = h('textarea', { rows: Math.min(12, Math.max(3, n.text.split('\n').length + 1)) }); ta.value = n.text; row.replaceChildren(ta, h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => store.editNote(r.key, n.id, { text: ta.value.trim() || n.text }) }, 'Save'), h('button', { class: 'btn', onclick: view }, 'Cancel'))); ta.focus(); };
+    view(); return row;
+  }
+  function feedItem(r, t, label) {
+    const pv = r.provenance, add = h('textarea', { rows: 2, placeholder: 'Write a note or a story about this recording…' }), notesSorted = [...r.notes].sort((a, b) => (a.at ?? -1) - (b.at ?? -1) || a.created - b.created);
+    return h('article', { class: 'ncard feed', 'data-key': r.key },
+      h('div', { class: 'fhead' }, cover(t),
+        h('div', { class: 'fht' }, h('div', {}, h('b', {}, label), r.key.startsWith('album:') ? h('span', { class: 'chip' }, 'album') : ''), h('div', { class: 'muted small' }, t ? [t.artist, t.isAlbum ? '' : t.album].filter(Boolean).join(' · ') : 'not in the current library'), r.rating ? stars(h, r.rating, v => store.setRating(r.key, v)) : ''),
+        h('div', { class: 'facts2' }, t ? h('button', { class: 'mini', onclick: () => playAt(t, null) }, '▶ play') : '', h('button', { class: 'mini', title: 'Post this track', onclick: () => share(t || { title: label }, null, r.rating) }, '↗ post'))),
+      pv ? h('div', { class: 'nc-prov' }, h('span', { class: 'chip' }, KIND_LABEL[pv.kind] || pv.kind), ' ', [pv.date, pv.device, pv.venue, pv.source].filter(Boolean).join(' · '), pv.note ? ' — ' + pv.note : '') : '',
+      r.tags.length || r.status ? h('div', {}, r.status ? h('span', { class: 'chip status' }, r.status) : '', ...r.tags.map(x => h('button', { class: 'chip tag', title: 'Filter by this tag', onclick: () => { $('#noteTag').value = x; paintLists(); } }, '#' + x))) : '',
+      ...notesSorted.map(n => feedNote(r, t, n)),
+      h('details', { class: 'fadd' }, h('summary', { class: 'link small' }, '＋ Add a note'), add, h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: async () => { const text = add.value.trim(); if (!text) return add.focus(); await store.addNote(r.key, { text }); } }, 'Add'))));
+  }
+
   async function paintLists() {
     if ($('#view-notes').hidden && $('#view-playlists').hidden) return;       // repainted when those views open (keeps big libraries cheap)
+    const ae = document.activeElement; if (ae && /^(TEXTAREA|INPUT)$/.test(ae.tagName) && ($('#noteCards').contains(ae) || $('#plList').contains(ae))) { listsPending = true; return; }      // never under someone typing
+    listsPending = false;
     const q = $('#noteSearch').value, minR = +$('#noteMin').value, tag = $('#noteTag').value, status = $('#noteStatus').value, recs = await store.find({ minRating: minR, text: q || undefined, tag: tag || undefined, status: status || undefined }), keys = byKey();
     const tags = await store.allTags(), tsel = $('#noteTag'); if (tsel.options.length !== tags.length + 1 || [...tsel.options].slice(1).some((o, i) => o.value !== tags[i][0])) { tsel.replaceChildren(h('option', { value: '' }, 'any tag'), ...tags.map(([g, n]) => h('option', { value: g, selected: g === tag }, `${g} (${n})`))); }
-    const rows = recs.filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated).map(r => {
-      const t = keys.get(r.key), pv = r.provenance;
-      return h('div', { class: 'ncard' },
-        h('div', { class: 'nc-head' }, h('b', {}, t ? t.title : r.key.replace(/^file:|^album:|#\d*$/g, '')), r.key.startsWith('album:') ? h('span', { class: 'chip' }, 'album') : '', h('span', { class: 'muted' }, t ? [t.artist, t.album].filter(Boolean).join(' · ') : 'not in the current library'), r.rating ? stars(h, r.rating, v => store.setRating(r.key, v)) : '', t ? h('button', { class: 'mini', onclick: () => player.playList(t.isAlbum ? t.tracks : [t], 0) }, '▶ play') : ''),
-        pv ? h('div', { class: 'nc-prov' }, h('span', { class: 'chip' }, KIND_LABEL[pv.kind] || pv.kind), ' ', [pv.date, pv.device, pv.venue, pv.source].filter(Boolean).join(' · '), pv.note ? ' — ' + pv.note : '') : '',
-        r.tags.length || r.status ? h('div', {}, r.status ? h('span', { class: 'chip status' }, r.status) : '', ...r.tags.map(x => h('button', { class: 'chip tag', title: 'Filter by this tag', onclick: () => { $('#noteTag').value = x; paintLists(); } }, '#' + x))) : '',
-        ...r.notes.slice(0, 4).map(n => h('div', { class: 'nc-note' }, h('span', { class: 'chip' }, n.at != null ? fmt(n.at) : 'whole'), ' ', n.text)), r.notes.length > 4 ? h('div', { class: 'muted small' }, `+ ${r.notes.length - 4} more`) : '');
-    });
-    $('#noteCards').replaceChildren(...rows); $('#emptyNotes').hidden = rows.length > 0;
-    const pls = await store.playlists(); $('#plList').replaceChildren(...pls.map(p => h('div', { class: 'ncard' }, h('div', { class: 'nc-head' }, h('b', {}, p.name), p.server ? h('span', { class: 'chip', title: 'A copy of a playlist on your server, refreshed on every sync' }, '☁ server') : '', h('span', { class: 'muted' }, `${p.items.length} tracks`),
-      h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'), p.server ? '' : h('button', { class: 'mini', onclick: () => store.deletePlaylist(p.id).then(paintLists) }, 'delete')))));
-    $('#emptyPl').hidden = pls.length > 0;
+    const shownRecs = recs.filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance).sort((a, b) => b.updated - a.updated);
+    feedItems = shownRecs.map(r => { const t = keys.get(r.key); return { r, t, label: t ? t.title : r.key.replace(/^file:|^album:|#\d*$/g, '') }; });
+    $('#noteCards').replaceChildren(...feedItems.map(({ r, t, label }) => feedItem(r, t, label))); $('#emptyNotes').hidden = feedItems.length > 0;
+
+    // playlists: one row each; open one to see (and play from) its tracks. Server playlists can be hidden, local ones deleted.
+    const hidden = new Set(lsGet('hiddenPlaylists', [])), all = await store.playlists(), pls = all.filter(p => showHidden || !hidden.has(p.id)), nHidden = all.filter(p => hidden.has(p.id)).length; if (!nHidden) showHidden = false;
+    $('#plHidden').hidden = !nHidden; $('#plHiddenN').textContent = nHidden; $('#plShowHidden').checked = showHidden;
+    $('#plList').replaceChildren(...pls.map(p => {
+      const ts = resolve(p), isOpen = open.has(p.id), dur = ts.reduce((s, t) => s + (t.duration || 0), 0), hid = hidden.has(p.id);
+      const toggle = () => { isOpen ? open.delete(p.id) : open.add(p.id); paintLists(); };
+      const del = h('button', { class: 'mini', onclick: () => { if (del.dataset.sure) store.deletePlaylist(p.id).then(paintLists); else { del.dataset.sure = '1'; del.textContent = 'really delete?'; setTimeout(() => { if (del.isConnected) { delete del.dataset.sure; del.textContent = 'delete'; } }, 4000); } } }, 'delete');
+      return h('div', { class: 'ncard pl' + (isOpen ? ' open' : '') + (hid ? ' hid' : ''), 'data-id': p.id },
+        h('div', { class: 'nc-head' }, h('button', { class: 'pltoggle', 'aria-expanded': String(isOpen), title: isOpen ? 'Hide the tracks' : 'Show the tracks', onclick: toggle }, isOpen ? '▾' : '▸'), h('b', { class: 'plname', onclick: toggle }, p.name),
+          p.server ? h('span', { class: 'chip', title: 'A copy of a playlist on your server, refreshed on every sync' }, '☁ server') : '', hid ? h('span', { class: 'chip' }, 'hidden') : '',
+          h('span', { class: 'muted' }, `${p.items.length} tracks${dur ? ' · ' + fmt(dur) : ''}${ts.length < p.items.length ? ` · ${p.items.length - ts.length} not in the library` : ''}`),
+          h('span', { class: 'facts2' }, h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'),
+            p.server ? h('button', { class: 'mini', title: hid ? 'Show it in this list again' : 'Hide it from this list (it stays on the server)', onclick: () => { hid ? hidden.delete(p.id) : hidden.add(p.id); lsSet('hiddenPlaylists', [...hidden]); paintLists(); } }, hid ? 'unhide' : 'hide') : del)),
+        isOpen ? h('ol', { class: 'pltracks' }, ...ts.map((t, i) => h('li', { title: 'Play from here', ondblclick: () => playNow(ts, i), onclick: () => playNow(ts, i) }, h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted mono small' }, t.duration ? fmt(t.duration) : '')))) : '');
+    }));
+    $('#emptyPl').hidden = all.length > 0;
   }
+  $('#noteCards').addEventListener('focusout', () => setTimeout(() => { if (listsPending) paintLists(); }, 0)); $('#plList').addEventListener('focusout', () => setTimeout(() => { if (listsPending) paintLists(); }, 0));
+  $('#plShowHidden').onchange = e => { showHidden = e.target.checked; paintLists(); };
+  $('#feedShare').onclick = () => {
+    const md = feedMarkdown(feedItems.map(({ r, t, label }) => ({ track: { title: label, artist: t?.artist || '' }, rating: r.rating, tags: r.tags, notes: [...r.notes].sort((a, b) => (a.at ?? -1) - (b.at ?? -1)) })), shareOpts());
+    const dlg = h('dialog', { class: 'tagdlg sharedlg', 'aria-label': 'Share the feed' }), ta = h('textarea', { rows: 14, class: 'sharetext' }), close = () => { dlg.close(); dlg.remove(); }; ta.value = md;
+    dlg.append(h('form', { method: 'dialog' }, h('h3', {}, 'Share the feed'), h('div', { class: 'muted small' }, `${feedItems.length} recordings, as shown (filters apply). Paste it into a blog, a thread or a doc, or save it as a Markdown file.`), ta,
+      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(ta.value); toast('Feed copied'); close(); } catch { ta.select(); toast('Press Cmd/Ctrl+C to copy', true); } } }, 'Copy'),
+        h('button', { class: 'btn', type: 'button', onclick: () => { saveText(`bootleg-feed-${new Date().toISOString().slice(0, 10)}.md`, ta.value, 'text/markdown'); close(); } }, 'Save as Markdown…'), h('button', { class: 'btn', type: 'button', onclick: close }, 'Close'))));
+    dlg.addEventListener('cancel', () => dlg.remove()); document.body.append(dlg); dlg.showModal();
+  };
   $('#noteSearch').oninput = paintLists; $('#noteMin').onchange = paintLists; $('#noteTag').onchange = paintLists; $('#noteStatus').onchange = paintLists;
 
   // ---- playlists
@@ -133,10 +187,10 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
   $('#m3uIn').onchange = async e => { for (const f of e.target.files) { const { name, items } = parseM3U(await f.text()), m = matchEntries(items, lib.tracks), hit = m.filter(x => x.track); await store.savePlaylist({ name: name || f.name.replace(/\.[^.]+$/, ''), items: hit.map(x => trackKey(x.track)) }); toast(`Imported “${name || f.name}”: ${hit.length} of ${items.length} matched the library`, hit.length === 0); } e.target.value = ''; };
 
   // ---- notes export / import (everything: notes, ratings, provenance, playlists)
-  $('#notesExport').onclick = async () => { const doc = await store.export(); await saveText(`bootleg-notes-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(doc, null, 2), 'application/json'); };
-  $('#notesImport').onclick = () => $('#notesIn').click();
+  const exportNotes = async () => { const doc = await store.export(); await saveText(`bootleg-notes-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(doc, null, 2), 'application/json'); };
+  const importNotes = () => $('#notesIn').click();
   $('#notesIn').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const r = await store.import(JSON.parse(await f.text())); toast(`Imported: ${r.added} new, ${r.merged} merged, ${r.playlists} playlists`); } catch (err) { toast('Could not import: ' + err.message, true); } };
 
   refresh(); paintLists();
-  return { store, paintLists, refresh };
+  return { store, paintLists, refresh, exportNotes, importNotes };
 }

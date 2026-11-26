@@ -133,6 +133,16 @@ fn main_window_event(w: &tauri::Window, e: &tauri::WindowEvent) {
 #[tauri::command]
 fn selftest_minimize(app: AppHandle, on: bool) { if let Some(w) = app.get_webview_window("main") { if on { let _ = w.minimize(); } else { let _ = w.unminimize(); let _ = w.set_focus(); } } }
 
+// ---- links out (posting a note opens the network's compose page in the user's browser) -------------------------------
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") || url.contains(char::is_whitespace) { return Err("only https links can be opened".into()); }
+    #[cfg(target_os = "macos")] let r = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "windows")] let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))] let r = std::process::Command::new("xdg-open").arg(&url).spawn();
+    r.map(|_| ()).map_err(|e| e.to_string())
+}
+
 // ---- files opened from the OS ----------------------------------------------------------------------------------------
 // They can arrive before the page has loaded (a cold start from Finder), so they wait here until the page takes them.
 #[derive(Default)]
@@ -183,7 +193,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .on_window_event(main_window_event)
         .setup(move |app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.

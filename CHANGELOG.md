@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
+### Added
+- **Post notes to social media**: every note (in the Notes feed and on Now playing) and every recording has “↗ post”, which opens Bluesky, Mastodon, Threads or X with the text filled in — the note, the track (and the moment), and `#nowplaying #bootleg` — or the system share sheet, or copies it. You can edit the text first; a post too long for a network gets its note shortened. **Share feed…** copies or saves the whole feed (as filtered) as Markdown. Settings → *Posting notes*: the tags, a link to bootleg, your Mastodon server.
+- **Playlists**: open one to see its tracks (and how many are not in the library) and play from any of them; server playlists can be hidden from the list (and shown again), local ones deleted (with a second click to confirm).
+
+### Changed
+- **Notes is a feed**: one column with room for the text, newest first. Notes can be expanded, edited, posted and deleted right there, and a note added to any recording. A moment's time plays the recording from there.
+- **Playlists** is one detailed list instead of three columns of cards.
+- *Export notes*, *Import notes* and *Forget* moved from the bottom of the left pane to **Settings → Notes and data**.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
@@ -55,6 +66,7 @@ First release: a music player for large libraries, with stem mixing, notes and l
 ### Fixed
 - Playback no longer waits for a stream to finish loading before starting, falls back to downloading the file when a stream is blocked or stalls, and shows a message saying why a track can't play instead of failing silently.
 
-[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/chrisskurda/bootleg/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/chrisskurda/bootleg/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chrisskurda/bootleg/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/chrisskurda/bootleg/releases/tag/v0.1.0
