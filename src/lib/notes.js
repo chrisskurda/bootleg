@@ -24,7 +24,7 @@ function mergeRecs(a, b) {
   const ids = new Set(nu.notes.map(x => x.id)); out.notes = [...nu.notes, ...old.notes.filter(x => !ids.has(x.id))];
   out.tags = [...new Set([...(old.tags || []), ...(nu.tags || [])])]; out.edits = old.edits || nu.edits ? { ...(old.edits || {}), ...(nu.edits || {}) } : null; return out;
 }
-const blank = key => ({ key, rating: 0, status: '', tags: [], notes: [], provenance: null, fingerprint: null, edits: null, updated: 0 });
+const blank = key => ({ key, rating: 0, status: '', tags: [], notes: [], provenance: null, fingerprint: null, edits: null, defects: [], updated: 0 });
 export class NotesStore extends EventTarget {
   constructor(backend = new MemoryBackend()) { super(); this.b = backend; }
   async get(key) { return (await this.b.get('t:' + key)) || blank(key); }
@@ -43,6 +43,9 @@ export class NotesStore extends EventTarget {
   // track, waiting for the server to re-read it). Dropping all edits drops this too.
   async setEditState(key, patch) { const r = await this.get(key); r.editState = r.edits ? { ...(r.editState || {}), ...patch } : null; return this._save(r); }
   async allEdits() { return new Map((await this.b.all()).filter(x => x.key.startsWith('t:') && x.value.edits).map(x => [x.value.key, x.value.edits])); }
+  // Defects (plugin spec 2.0 §6): stretches known to be damaged — { start, end, kind, confidence, detail }, in seconds.
+  // Each plugin owns its own (`by`): setting replaces that plugin's list and leaves the others alone.
+  async setDefects(key, by, list) { const r = await this.get(key); r.defects = [...(r.defects || []).filter(d => d.by !== by), ...(list || []).map(d => ({ start: +d.start || 0, end: +d.end || 0, kind: d.kind || 'uncertain', confidence: d.confidence ?? null, detail: d.detail || '', by }))]; return this._save(r); }
   async setFingerprint(key, fp) { const r = await this.get(key); r.fingerprint = fp; return this._save(r); }
   // A note with `at` (seconds) lives on the timeline; with `to` it covers a range; without either it is a note on the whole recording.
   async addNote(key, { text, at = null, to = null, kind = 'note' }) { const r = await this.get(key), n = { id: uid(), text, at, to, kind, created: Date.now() }; r.notes.push(n); await this._save(r); return n; }
@@ -52,7 +55,7 @@ export class NotesStore extends EventTarget {
   async allTags() { const c = new Map(); for (const { key, value } of await this.b.all()) if (key.startsWith('t:')) for (const g of value.tags || []) c.set(g, (c.get(g) || 0) + 1); return [...c].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); }
   async find({ minRating = 0, tag, text, status } = {}) { const q = text?.toLowerCase(); return (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating >= minRating && (!tag || r.tags.includes(tag)) && (!status || r.status === status) && (!q || r.notes.some(n => n.text.toLowerCase().includes(q)) || (r.provenance && JSON.stringify(r.provenance).toLowerCase().includes(q)))); }
 
-  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance || r.edits); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
+  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance || r.edits || r.defects?.length); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
   // Merge: newer record wins per track; notes are unioned by id so two devices don't lose each other's work.
   async import(doc) {
     if (!doc || doc.format !== NOTES_FORMAT) throw new Error('not a bootleg notes file'); if (doc.version > NOTES_VERSION) throw new Error('notes file is from a newer bootleg');

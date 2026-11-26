@@ -1,6 +1,15 @@
 # bootleg plugin spec 2.0 (draft)
 
-Status: **draft**, 2026-11-26. Not implemented yet. The first plugin built on it is the CD plugin ([plugins/CD.md](plugins/CD.md)). The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
+Status: **draft, partly implemented** (2026-11-26). The first plugin built on it is the CD plugin ([plugins/CD.md](plugins/CD.md)).
+
+**Implemented so far:**
+- the manifest and `plugins/` packages (§2, §3), and the platform levels and confirmation (§4)
+- native code compiled in behind a Cargo feature, and the capability added at run time (§5.1, §5.4)
+- `bootleg-plugin-api` with `SPEC` and `Jobs` (§5.3)
+- these parts of §6: `api.platform`, `api.native.invoke`/`job`, `api.net.fetch`, `api.dialog.folder`, `api.library.import`/`annotate`/`defects.clear`/`roots`, and defects (stored, timeline bands, the ⚠ badge, `has:defects`)
+- the desktop self-test scenario (§7.3)
+
+**Not implemented yet:** `Media`, `Paths`, `Tags` (§5.3), `api.native.on`, `api.sources.*`, `api.outputs.register`, `api.metadata.register`, `api.media`, `api.devices`, `api.transcode`, and the *Damaged* smart list. The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
 
 Spec 1 is what exists today: JS-only extensions ([EXTENSIONS.md](EXTENSIONS.md)) plus the source and output contracts that are compiled into the app ([SOURCE-PLUGINS.md](SOURCE-PLUGINS.md)). Spec 2.0 keeps all of that working and adds:
 
@@ -127,6 +136,8 @@ Each native crate ships `permissions/default.toml`, which allows its commands. W
 Everything from spec 1 is unchanged: `api.player`, `api.viz`, `api.library`, `api.settings`, `api.ui.addView`, `api.audio`, `api.toast` and `api.id`. Spec 2.0 adds:
 | | |
 |---|---|
+| `api.net.fetch(url, init)` | `fetch` that, on the desktop, goes through the Tauri HTTP plugin (no CORS limits), as source plugins use |
+| `api.library.roots()` | the library's folders, e.g. as a default place to write into |
 | `api.platform` | `{ os: 'macos'\|'linux'\|'windows'\|'web', arch, appVersion, spec, status }`. `status` is this plugin's level on the current target |
 | `api.native` | present only when the native part is in this build. `invoke(cmd, args) → Promise` (a call to `plugin:bootleg-<id>\|<cmd>`); `job(cmd, args, onEvent) → { id, done: Promise<result>, cancel() }`; `on(event, cb) → unsubscribe` for events the native side pushes (a disc inserted or ejected); `backend` (the active backend's name) |
 | `api.sources.register(source)` | registers a source plugin (the existing contract) for as long as this plugin runs |

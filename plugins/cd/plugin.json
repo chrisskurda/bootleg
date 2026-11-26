@@ -1,0 +1,16 @@
+{
+  "spec": "2.0",
+  "id": "cd",
+  "name": "CD",
+  "version": "0.1.0",
+  "description": "Rip audio CDs securely: every sector read until it agrees, verified with AccurateRip, FLAC by default. Damaged discs give everything they can, and the library shows what is missing.",
+  "entry": "index.js",
+  "provides": ["view", "metadata"],
+  "platforms": {
+    "macos":   { "status": "experimental", "min": "12.0", "arch": ["aarch64", "x86_64"] },
+    "linux":   { "status": "unavailable", "why": "The Linux backend is not written yet." },
+    "windows": { "status": "unavailable", "why": "The Windows backend is not written yet." },
+    "web":     { "status": "unavailable", "why": "Browsers cannot read optical drives." }
+  },
+  "native": { "crate": "native", "feature": "plugin-cd" }
+}

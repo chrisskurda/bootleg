@@ -64,6 +64,8 @@ jobs:
       - run: npm ci
       - name: Build the app
         run: npx tauri build --bundles ${{ matrix.bundles }}
+      - name: Native plugin tests (CD engine against its simulator; every OS must compile — plugin spec §5.2)
+        run: cargo test --manifest-path plugins/cd/native/Cargo.toml
       - name: Self-test the built app (scan, tags, playback, stems, cache, notes, Subsonic)
         shell: bash
         continue-on-error: ${{ runner.os == 'Windows' }}      # new on Windows: reported, not yet blocking a release

@@ -181,6 +181,17 @@ fn selftest_done(app: AppHandle, result: String) {
     app.exit(0);
 }
 
+/// Plugin spec 2.0 (docs/PLUGIN-SPEC.md): which spec this app implements and which native plugins this build contains.
+#[tauri::command]
+fn plugin_runtime() -> serde_json::Value {
+    #[allow(unused_mut)] let mut native: Vec<&str> = vec![];
+    #[cfg(feature = "plugin-cd")] native.push("cd");
+    serde_json::json!({ "spec": bootleg_plugin_api::SPEC, "os": env::consts::OS, "arch": env::consts::ARCH, "native": native })
+}
+/// Cancel a native plugin's job (§5.3).
+#[tauri::command]
+fn plugin_job_cancel(id: u64) -> bool { bootleg_plugin_api::jobs().cancel(id) }
+
 fn main() {
     let selftest = env::var("BOOTLEG_SELFTEST").is_ok();
     let mut builder = tauri::Builder::default().manage(Opened::default());
@@ -189,13 +200,17 @@ fn main() {
     if !selftest {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| { receive_opened(app, audio_files(arg_paths(argv.into_iter().skip(1), Path::new(&cwd)))); }));
     }
-    builder
+    builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .plugin(tauri_plugin_http::init());
+    #[cfg(feature = "plugin-cd")] { builder = builder.plugin(bootleg_plugin_cd::init()); }
+    builder
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, plugin_runtime, plugin_job_cancel])
         .on_window_event(main_window_event)
         .setup(move |app| {
+            // Native plugins' permissions, for the player window only, and only for those compiled into this build (§5.4)
+            #[cfg(feature = "plugin-cd")] app.add_capability(r#"{ "identifier": "plugin-cd", "windows": ["main"], "permissions": ["bootleg-cd:default"] }"#)?;
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
             if env::var("BOOTLEG_SELFTEST").is_ok() { b = b.initialization_script("window.__BOOTLEG_SELFTEST = true;"); }

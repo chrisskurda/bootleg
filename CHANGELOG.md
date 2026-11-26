@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **CD ripping** (the *CD* plugin, Settings → Plugins; macOS, experimental until it has been checked on real drives).
+  - Every sector is read until two reads agree, with the drive's cache flushed in between. Sectors that won't settle are re-read with the drive slowed down.
+  - Rips are checked against AccurateRip, and the read offset comes from AccurateRip's drive list.
+  - FLAC by default, decoded back and compared before it is kept; WAV and AIFF too.
+  - Each rip gets MusicBrainz tags and cover art, a cue sheet, a playlist and a detailed log.
+  - **A damaged disc still gives everything it can.** What could not be read is filled in (short gaps interpolated, long ones silenced), flagged on the track with ⚠, and shown as red bands on the Now playing timeline. Search `has:defects` to find them.
+  - Ripped tracks arrive in the library with *CD rip* provenance and `rip:verified` / `rip:secure` / `rip:suspect` / `rip:damaged` tags.
+  - **Check drive** reports what a drive can do on your Mac.
+- **Plugin spec 2.0** (draft, docs/PLUGIN-SPEC.md): plugins can include native code with a backend per platform, declare which platforms they support and how well tested each is, run long jobs, and add files and annotations to the library. Settings → *Extensions* is now *Plugins* and shows each plugin's status on this computer.
+
+### Added
 - Plan and plugin spec for **syncing to portable players** (USB-storage players, SD cards, bootleg-pod handhelds): paired players and media, add / mirror / fill modes, and bootleg only ever replacing or deleting files it put there. Plugin spec 2.0 gains `device` handlers and a shared transcoder; the spec 2.1 draft adds helper processes and an experimental-plugin flag. An experimental iPod plugin is on the roadmap.
 
 ## [0.6.0] - 2026-11-26

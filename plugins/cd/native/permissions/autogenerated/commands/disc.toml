@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-disc"
+description = "Enables the disc command without any pre-configured scope."
+commands.allow = ["disc"]
+
+[[permission]]
+identifier = "deny-disc"
+description = "Denies the disc command without any pre-configured scope."
+commands.deny = ["disc"]

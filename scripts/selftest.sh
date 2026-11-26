@@ -17,6 +17,7 @@ for _ in $(seq 1 30); do grep -q 'mock:' "$T/mock.log" && break; sleep 0.2; done
 node tests/mock-dlna.mjs "$T/dlna.log" > "$T/dlna.out" & DLNA=$!
 for _ in $(seq 1 30); do grep -q 'dlna:' "$T/dlna.out" && break; sleep 0.2; done
 export BOOTLEG_SELFTEST_DLNA="$(sed 's/dlna: //' "$T/dlna.out")"
+node scripts/make-cd-sim.mjs "$T/CDSIM" >/dev/null; export BOOTLEG_CD_BACKEND=sim BOOTLEG_CD_SIM="$T/CDSIM" BOOTLEG_CD_OFFLINE=1   # the CD plugin rips a simulated scratched disc
 export BOOTLEG_SELFTEST="$T/L" BOOTLEG_SELFTEST_OUT="$T/out.json" BOOTLEG_SELFTEST_SUBSONIC="$(sed 's/mock: //' "$T/mock.log")"
 RUN=("$BIN"); if [ "$(uname)" = Linux ]; then RUN=(xvfb-run -a -s "-screen 0 1400x900x24" dbus-run-session -- "$BIN"); fi
 # A freshly built macOS binary sometimes refuses its very first autoplay (WebKit policy); one retry is enough in practice.
@@ -30,4 +31,5 @@ if (skip) console.log("note: autoplay is blocked on this machine; playback-depen
 if (!skip && !(r.tracks >= 1 && r.renders >= 1 && r.stems === 5 && r.peak > 0.2 && r.remoteTracks === 2 && r.remotePeak > 0.2)) bad.push("playback/stems/remote");
 const log = (require("fs").existsSync(process.argv[2]) ? require("fs").readFileSync(process.argv[2], "utf8") : "").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)), has = f => log.some(f);
 if (!skip && !(has(l => l.action === "SetAVTransportURI" && /^http:\/\/[^/]+\/m\/[0-9a-f]{32}\.flac$/.test(l.uri) && l.title === "Self Test" && l.artist === "Tester" && l.mime === "audio/flac") && has(l => l.action === "Play") && has(l => l.fetched === 206 && l.bytes === 100 && /flac/.test(l.type)) && has(l => l.action === "Pause") && has(l => l.action === "Seek" && l.target === "00:00:03") && has(l => l.action === "SetVolume" && l.volume === 50) && has(l => l.artFetched === 200 && l.bytes > 100 && /^image\//.test(l.type)) && has(l => l.action === "Stop") && r.dlnaLocalRestored)) bad.push("dlna: " + JSON.stringify(log).slice(0, 400));
+if (!(r.cd && (r.cd.ok || r.cd.skipped === "not in this build"))) bad.push("cd: " + JSON.stringify(r.cd));
 if (bad.length) { console.error("SELF-TEST FAILED:", bad.join(", "), r.error || ""); process.exit(1); } console.log("self-test passed");' "$T/out.json" "$T/dlna.log"

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-rip"
+description = "Enables the rip command without any pre-configured scope."
+commands.allow = ["rip"]
+
+[[permission]]
+identifier = "deny-rip"
+description = "Denies the rip command without any pre-configured scope."
+commands.deny = ["rip"]

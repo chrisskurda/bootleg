@@ -68,6 +68,7 @@ export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, compose
     const d = player.dur() || item?.duration || 0, w = calls.clientWidth || tl.clientWidth; calls.replaceChildren(); ranges.replaceChildren(); calls.style.height = '10px'; if (!rec || !d) return;
     const timed = rec.notes.filter(n => n.at != null);
     for (const n of timed.filter(n => n.to != null)) { const b = h('button', { class: 'tlrange', title: `${fmt(n.at)}–${fmt(n.to)}  ${n.text}`, onclick: () => player.seek(n.at) }); b.style.left = n.at / d * 100 + '%'; b.style.width = Math.max(0.3, (n.to - n.at) / d * 100) + '%'; ranges.append(b); }
+    for (const x of rec.defects || []) { const b = h('button', { class: 'tldefect ' + x.kind, title: `⚠ ${fmt(x.start)}–${fmt(x.end)}  ${x.kind}${x.detail ? ' — ' + x.detail : ''}`, onclick: () => player.seek(x.start) }); b.style.left = x.start / d * 100 + '%'; b.style.width = Math.max(0.3, (x.end - x.start) / d * 100) + '%'; ranges.append(b); }
     const laid = layoutCallouts(timed.map(n => ({ n, x: n.at / d * w, label: n.text.split('\n')[0] })), w), used = Math.max(0, ...laid.map(c => c.lane + 1)); calls.style.height = (used ? used * LANE_H + 8 : 10) + 'px';
     for (const c of laid) {
       const pin = h('button', { class: 'tlpin', title: `${fmt(c.n.at)}  ${c.n.text}`, onclick: () => player.seek(c.n.at) }); pin.style.left = c.x + 'px'; pin.style.height = (c.lane < 0 ? 8 : (used - c.lane) * LANE_H - 10) + 'px'; calls.append(pin);

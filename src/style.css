@@ -253,3 +253,12 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .djp .badge { display: inline-block; padding: 1px 7px; border-radius: 9px; background: var(--panel2); font-size: 11px; margin: 2px; } .djp .badge.ok { color: var(--ok); } .djp .badge.warn { color: var(--bad); }
 .qi .qb { display: flex; gap: 3px; }
 @media (max-width: 900px) { .djp .decks { grid-template-columns: minmax(0, 1fr); } }
+
+/* plugins (spec 2): platform status badges in Settings; defects on the timeline */
+.pbadge { margin-left: 8px; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; vertical-align: 1px; background: #ffffff14; color: var(--mut, #aaa); }
+.pbadge.experimental { background: #ffb02033; color: #ffc65c; } .pbadge.missing, .pbadge.unavailable { background: #ffffff10; }
+.srow.dim { opacity: .55; }
+.tldefect { position: absolute; top: 0; bottom: 0; padding: 0; border: 0; pointer-events: auto; cursor: pointer; background: repeating-linear-gradient(135deg, #ff3b3b55 0 4px, #ff3b3b22 4px 8px); border-left: 1px solid #ff5b5b; border-right: 1px solid #ff5b5b; }
+.tldefect.uncertain { background: repeating-linear-gradient(135deg, #ffb02044 0 4px, #ffb02018 4px 8px); border-color: #ffb020; }
+.tldefect.interpolated { background: #ff8a3c33; border-color: #ff8a3c; }
+.chip.defchip { color: #ff6b6b; border-color: #ff6b6b66; }

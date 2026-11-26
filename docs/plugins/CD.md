@@ -1,14 +1,46 @@
-# CD plugin: play, rip, tag (design)
+# CD plugin: play, rip, tag
 
-Status: **design**, 2026-11-26. Built on [plugin spec 2.0](../PLUGIN-SPEC.md).
+Status: **0.1 implemented, `experimental` on macOS** (2026-11-26). It has not run against a real drive yet; see *Trying it* below. Built on [plugin spec 2.0](../PLUGIN-SPEC.md).
+
+**What 0.1 does:**
+- the Rip page: drive, disc, MusicBrainz release picker and cover, editable tags, output and reading options
+- secure reading: two passes with the cache defeated, re-read rounds that slow the drive down, C2 when you trust it
+- the read offset, from AccurateRip's drive list
+- AccurateRip v1/v2 verification
+- output: FLAC (decoded back and compared before it's kept), WAV or AIFF, with tags, cover, cue sheet, playlist, and the log in text and JSON
+- salvage of damaged discs, with defects in the library
+- import with `cd-rip` provenance and `rip:*` tags
+
+**Not yet:**
+- playing a disc without ripping it (the source kind)
+- CTDB verification and repair
+- the library checker
+- pregap/HTOA detection from the Q subchannel
+- remembering raw reads for later re-rips
+- the Linux and Windows backends
+
+The code lives in `plugins/cd/`: `index.js` is the page, `cd-logic.js` its logic, and `native/` the Rust part (`toc`, `backend/{sim,macos}`, `secure`, `salvage`, `accuraterip`, `output`, `rip`, `plugin`).
+
+## Trying it
+**Without a drive:**
+1. Run `node scripts/make-cd-sim.mjs /tmp/cdsim`.
+2. Start bootleg with `BOOTLEG_CD_BACKEND=sim BOOTLEG_CD_SIM=/tmp/cdsim`, then turn on the plugin in Settings → Plugins.
+3. Two simulated drives appear. *Clean* rips secure. *Damaged* has a light scratch that recovers, 10 dead sectors that are salvaged and flagged, and sectors that only read slowly.
+
+To try the engine alone: `cargo run --example rip_sim -- /tmp/cdsim sim:Damaged /tmp/out` in `plugins/cd/native`.
+
+**With a drive (the milestone 1 spike):**
+1. Connect the drive, insert an audio CD, open the CD page and press **Check drive**.
+2. It reports whether these work while macOS keeps the disc mounted: the TOC, audio reads, C2 and Q subchannel in one read, the offset units, the Q position and CRC, speed control, ISRC and MCN.
+3. Add the result to the hardware log below. Then rip a disc that is in AccurateRip with the offset looked up. Every track coming back *Accurate* confirms the whole path.
 
 **Goal:** a ripper as careful as the rest of bootleg: secure and verified, and able to recover discs that iTunes and other quick rippers give up on. When a disc is too damaged for a perfect copy, it saves as much of the audio as can be read, and the library shows exactly what is missing or uncertain.
 
 | Target | Status | Backend |
 |---|---|---|
-| macOS 12+ | `supported` (once the hardware log has an entry) | `macos-iokit`: `DKIOCCDREAD` on `/dev/rdiskN` (user data + C2 error flags + Q subchannel), `DKIOCCDREADTOC` / `ISRC` / `MCN`, `DKIOCCDSETSPEED`; DiskArbitration for insert/eject |
-| Linux | `experimental` | `linux-sgio`: SG_IO with MMC `READ CD` (0xBE), `READ TOC/PMA/ATIP`, `SET CD SPEED` |
-| Windows | `experimental` | `windows-spti`: `IOCTL_SCSI_PASS_THROUGH_DIRECT` with the same MMC commands |
+| macOS 12+ | `experimental` until the hardware log has an entry | `macos-iokit`: `DKIOCCDREAD` on `/dev/rdiskN` (user data + C2 error flags + Q subchannel), `DKIOCCDREADTOC` / `ISRC` / `MCN`, `DKIOCCDSETSPEED`; DiskArbitration for insert/eject |
+| Linux | `unavailable` (not written yet; then `experimental`) | `linux-sgio`: SG_IO with MMC `READ CD` (0xBE), `READ TOC/PMA/ATIP`, `SET CD SPEED` |
+| Windows | `unavailable` (not written yet; then `experimental`) | `windows-spti`: `IOCTL_SCSI_PASS_THROUGH_DIRECT` with the same MMC commands |
 | web | `unavailable` | browsers cannot read drives |
 
 ## Provides

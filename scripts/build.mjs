@@ -13,8 +13,18 @@ fs.writeFileSync(path.join(dist, 'packs.json'), JSON.stringify(packs));
 const extList = []; const extSrc = path.join(root, 'extensions');
 if (fs.existsSync(extSrc)) for (const id of fs.readdirSync(extSrc)) { const mf = path.join(extSrc, id, 'extension.json'); if (!fs.existsSync(mf)) continue; const m = JSON.parse(fs.readFileSync(mf, 'utf8')); fs.cpSync(path.join(extSrc, id), path.join(dist, 'extensions', id), { recursive: true, filter: s => !s.endsWith('.test.mjs') }); extList.push({ ...m, id: m.id || id, entry: `/extensions/${id}/${m.entry || 'index.js'}` }); }
 fs.writeFileSync(path.join(dist, 'extensions.json'), JSON.stringify(extList));
+// plugins (spec 2, docs/PLUGIN-SPEC.md): plugins/<id>/plugin.json + the JS entry. The native/ crate and fixtures/ are not
+// shipped as files (native code is compiled into the app behind its Cargo feature). Listed in plugins.json.
+const plugList = []; const plugSrc = path.join(root, 'plugins');
+if (fs.existsSync(plugSrc)) for (const id of fs.readdirSync(plugSrc)) {
+  const mf = path.join(plugSrc, id, 'plugin.json'); if (!fs.existsSync(mf)) continue; const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  if (!/^2\./.test(String(m.spec || ''))) throw new Error(`plugins/${id}: spec ${m.spec} is not supported by this build (2.x)`);
+  fs.cpSync(path.join(plugSrc, id), path.join(dist, 'plugins', id), { recursive: true, filter: s => { const r = path.relative(path.join(plugSrc, id), s).split(path.sep)[0]; return r !== 'native' && r !== 'fixtures' && !s.endsWith('.test.mjs'); } });
+  plugList.push({ ...m, id: m.id || id, entry: `/plugins/${id}/${m.entry || 'index.js'}` });
+}
+fs.writeFileSync(path.join(dist, 'plugins.json'), JSON.stringify(plugList));
 // build stamp (shown in Settings): which commit this build is
 import { execSync } from 'node:child_process';
 let commit = process.env.GITHUB_SHA?.slice(0, 7) || ''; try { commit ||= execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { /* not a git checkout */ }
 fs.writeFileSync(path.join(dist, 'build.json'), JSON.stringify({ commit, date: new Date().toISOString().slice(0, 10), version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version }));
-console.log(`dist/ ready: ${packs.length} packs, ${fs.readdirSync(dist).length} top-level entries`);
+console.log(`dist/ ready: ${packs.length} packs, ${plugList.length} plugins, ${fs.readdirSync(dist).length} top-level entries`);

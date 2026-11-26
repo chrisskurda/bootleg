@@ -16,7 +16,8 @@ import { RemoteAnnotations } from '/lib/sources/annotations.js';
 import { openTagEditor } from '/lib/tag-editor.js';
 import { TagFiles } from '/lib/tag-files.js';
 import { openTagReview } from '/lib/tag-files-ui.js';
-import { Extensions } from '/lib/extensions.js';
+import { Extensions, nativeApi } from '/lib/extensions.js';
+import { netFetch } from '/lib/sources/net.js';
 import { Outputs } from '/lib/outputs/manager.js';
 import { getOutput } from '/lib/outputs/index.js';
 import { readTags } from '/lib/tags.js';
@@ -69,15 +70,24 @@ addEventListener('fullscreenchange', () => vizDock.update());
 // ------------------------------------------------------------------ lists
 let shown = [];
 const cover = (url, cls = 'cover') => url ? h('img', { class: cls, src: url, alt: '', loading: 'lazy' }) : h('div', { class: cls + ' ph' }, '♪');
+// Recordings with defects (damaged rips and the like, plugin spec 2.0 §6): a ⚠ in the lists, searchable as has:defects.
+const damaged = new Map();       // track key → defects
+async function loadDamaged(key) {
+  if (typeof key === 'string' && key !== '*') { const r = await notes.store.get(key); r.defects?.length ? damaged.set(key, r.defects) : damaged.delete(key); }
+  else { damaged.clear(); for (const { key: k, value } of await notes.store.b.all()) if (k.startsWith('t:') && value.defects?.length) damaged.set(value.key, value.defects); }
+  trackVL.schedule();
+}
+const defectChip = t => { const d = damaged.get(trackKey(t)); return d ? h('span', { class: 'chip defchip', title: `Damaged: ${d.length} stretch${d.length === 1 ? '' : 'es'} did not read cleanly (${[...new Set(d.map(x => x.kind))].join(', ')}). See Now playing.` }, '⚠') : ''; };
 function trackRow(t, i) {
   return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(shown, i, true) },
     h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => acts.now(shown, i, true) }, '▶')),
-    h('span', { class: 'tt' }, t.title, t.edited ? h('span', { class: 'chip', title: 'Tags edited in bootleg (the file/server is unchanged)' }, '✎') : '', t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
+    h('span', { class: 'tt' }, t.title, defectChip(t), t.edited ? h('span', { class: 'chip', title: 'Tags edited in bootleg (the file/server is unchanged)' }, '✎') : '', t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
     h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, t.kind === 'track' ? h('button', { class: 'mini', title: 'Edit tags (in bootleg)', onclick: () => editTags([t]) }, 'edit') : '', h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
 const trackVL = new VirtualList({ scroller: $('#view-tracks'), container: $('#trackList'), rowH: 38, render: (t, i) => trackRow(t, i) });
 function renderTracks() {
-  const next = lib.search(lib.sortedTracks(), $('#search').value); if (next !== shown) { shown = next; trackVL.setItems(shown); } else trackVL.schedule();
+  const q = $('#search').value, hasDef = /(^|\s)has:defects(\s|$)/.test(q), base = hasDef ? lib.sortedTracks().filter(t => damaged.has(trackKey(t))) : lib.sortedTracks();
+  const next = lib.search(base, hasDef ? q.replace(/(^|\s)has:defects(\s|$)/, ' ').trim() : q); if (next !== shown) { shown = next; trackVL.setItems(shown); } else trackVL.schedule();
   $('#emptyTracks').hidden = lib.visibleItems.length > 0; $('.thead').hidden = !lib.visibleItems.length;
 }
 // ---- albums: grid / list / cover flow
@@ -386,21 +396,66 @@ function addExtView(extId, { id = extId, title, mount }) {
   extViews.set(v, rec); return rec.remove;
 }
 
-const extApi = id => ({
+// Plugins (spec 2, docs/PLUGIN-SPEC.md §6) also get the platform, their native commands, a folder picker and library
+// import/annotate (provenance, tags, notes and defects on recordings, keyed like everything else the user writes).
+const pluginRuntime = { os: TAURI ? '' : 'web', arch: '', native: [], spec: '2.0' };
+async function libTrackByPath(path, ms = 15000) { const t0 = Date.now(); for (;;) { const t = lib._byPath.get(path); if (t && (t.tagged || t.kind !== 'track')) return t; if (Date.now() - t0 > ms) return t || null; await new Promise(r => setTimeout(r, 150)); } }
+async function annotate(by, path, { tags, notes: ns, provenance, defects } = {}) {
+  const t = await libTrackByPath(path); if (!t) throw new Error(`not in the library: ${path}`); const key = trackKey(t), st = notes.store;
+  if (tags?.length) { const r = await st.get(key); await st.setTags(key, [...r.tags, ...tags]); }
+  if (provenance) await st.patchProvenance(key, provenance);
+  if (ns) { const r = await st.get(key); for (const n of r.notes.filter(n => n.by === by)) await st.removeNote(key, n.id); for (const n of ns) { const x = await st.addNote(key, typeof n === 'string' ? { text: n } : n); await st.editNote(key, x.id, { by }); } }
+  if (defects) await st.setDefects(key, by, defects);
+  return key;
+}
+const extApi = (id, meta = {}) => ({
   id, player, library: lib, toast,
   viz: { get pack() { return viz.pack; }, get packs() { return viz.packs; }, setPack: pid => viz.setPack(pid), onFrame: cb => viz.onFrame(cb) },
   settings: { get: (k, d) => store.get(`ext.${id}.${k}`, d), set: (k, v) => store.set(`ext.${id}.${k}`, v) },
   ui: { addView: v => addExtView(id, v) },
   audio: { get context() { return feed.ctx; }, insert: (node, out) => player.insert(node, out) },
+  ...(meta.kind === 'plugin' ? {
+    platform: { ...pluginRuntime, appVersion: '', status: extensions.availability(id).status },
+    net: { fetch: netFetch },
+    ...(TAURI && meta.native && pluginRuntime.native.includes(id) ? { native: nativeApi(TAURI, id) } : {}),
+    ...(TAURI ? { dialog: { folder: async ({ title } = {}) => { const d = await TAURI.dialog.open({ directory: true, multiple: false, title }); if (d) await TAURI.core.invoke('allow_path', { path: d }); return d || null; } } } : {}),
+    library: Object.assign(Object.create(lib), {
+      roots: () => libs.allRoots().map(r => r.root),
+      /// Add files the plugin wrote to the library now (their folder becomes a library folder if it isn't inside one), then annotate them.
+      async import(paths, ann = {}) {
+        if (!TAURI) throw new Error('importing files needs the desktop app');
+        for (const p of paths) if (!libs.allRoots().some(r => p.startsWith(r.root.replace(/\/?$/, '/')))) { const dir = p.replace(/[\\/][^\\/]+$/, ''); libs.addRoot(libs.target().id, dir); await TAURI.core.invoke('allow_path', { path: dir }); }
+        await addSources(await sourcesFromPathsTauri(paths), 'Imported');
+        const per = typeof ann === 'function' ? ann : () => ann; const keys = [];
+        for (const p of paths) keys.push(await annotate(id, p, per(p)));
+        return keys;
+      },
+      annotate: (path, ann) => annotate(id, path, ann),
+      defects: { clear: async path => { const t = await libTrackByPath(path, 0); if (t) await notes.store.setDefects(trackKey(t), id, []); } },
+    }),
+  } : {}),
 });
-const extensions = new Extensions({ store, api: extApi });
+const extensions = new Extensions({ store, api: extApi, runtime: pluginRuntime });
 extensions.addEventListener('change', () => { for (const r of [...extViews.values()]) if (!extensions.running.has(r.extId)) r.remove(); if (view === 'settings') paintSettings(); });
+const STATUS_LABEL = { supported: '', experimental: 'experimental here', unavailable: 'not available here', missing: 'not in this build' };
 function extensionRows() {
-  if (!extensions.list.length) return [h('div', { class: 'muted small' }, 'No extensions installed.')];
+  if (!extensions.list.length) return [h('div', { class: 'muted small' }, 'No plugins installed.')];
   return extensions.list.flatMap(e => {
-    const on = extensions.enabled(e.id), st = extensions.status(e.id);
-    const rows = [h('label', { class: 'srow' }, h('span', {}, h('b', {}, e.name), h('small', {}, e.description || ''), on ? h('small', { class: extensions.error(e.id) ? 'err' : 'muted' }, extensions.error(e.id) || st || 'starting…') : ''), h('input', { type: 'checkbox', checked: on, onchange: ev => extensions.setEnabled(e.id, ev.target.checked) }))];
-    if (on) for (const f of e.settings || []) rows.push(h('label', { class: 'srow sub' }, h('span', {}, h('b', {}, f.label), f.hint ? h('small', {}, f.hint) : ''), h('input', { type: f.type === 'number' ? 'number' : 'text', value: extensions.setting(e.id, f.key, f.default), onchange: ev => extensions.setSetting(e.id, f.key, f.type === 'number' ? +ev.target.value : ev.target.value) })));
+    const on = extensions.enabled(e.id), st = extensions.status(e.id), av = extensions.availability(e.id), badge = STATUS_LABEL[av.status];
+    const toggle = async ev => {
+      const want = ev.target.checked, warn = want && extensions.needsConfirm(e.id);
+      if (warn) { ev.target.checked = false; const box = ev.target.closest('.srow'); if (box.nextElementSibling?.classList.contains('pconfirm')) return;
+        box.after(h('div', { class: 'srow sub pconfirm' }, h('span', {}, h('small', { class: 'err' }, warn)), h('span', {}, h('button', { class: 'btn', onclick: async () => { extensions.confirm(e.id); await extensions.setEnabled(e.id, true); } }, 'Turn on'), ' ', h('button', { class: 'btn', onclick: ev2 => ev2.target.closest('.pconfirm').remove() }, 'Cancel')))); return; }
+      extensions.setEnabled(e.id, want);
+    };
+    const rows = [h('label', { class: 'srow' + (av.can ? '' : ' dim') }, h('span', {}, h('b', {}, e.name, badge ? h('span', { class: 'pbadge ' + av.status }, badge) : ''), h('small', {}, e.description || ''), av.why ? h('small', { class: 'muted' }, av.why) : '', on && av.can ? h('small', { class: extensions.error(e.id) ? 'err' : 'muted' }, extensions.error(e.id) || st || 'starting…') : ''), h('input', { type: 'checkbox', checked: on && av.can, disabled: !av.can, onchange: toggle }))];
+    if (on && av.can) for (const f of e.settings || []) {
+      const v = extensions.setting(e.id, f.key, f.default), set = val => extensions.setSetting(e.id, f.key, val);
+      const input = f.type === 'select' ? h('select', { onchange: ev => set(ev.target.value) }, ...(f.options || []).map(o => h('option', { value: o, selected: o === v }, o)))
+        : f.type === 'bool' ? h('input', { type: 'checkbox', checked: !!v, onchange: ev => set(ev.target.checked) })
+        : h('input', { type: f.type === 'number' ? 'number' : 'text', value: v, onchange: ev => set(f.type === 'number' ? +ev.target.value : ev.target.value) });
+      rows.push(h('label', { class: 'srow sub' }, h('span', {}, h('b', {}, f.label), f.hint ? h('small', {}, f.hint) : ''), input));
+    }
     return rows;
   });
 }
@@ -490,7 +545,7 @@ async function paintSettings() {
     h('h3', {}, '.nfo files'),
     row('Read .nfo files', 'album.nfo / artist.nfo (Kodi style) and plain-text .nfo in your folders: shown with the track and searchable.', chk('useNfo')),
     row('Fill missing tags from .nfo', 'Tags in the files always win; an .nfo only supplies what is missing (album, artist, year, genre).', chk('nfoFill')),
-    h('h3', {}, 'Extensions'), ...extensionRows(),
+    h('h3', {}, 'Plugins'), ...extensionRows(),
     h('h3', {}, 'About'),
     h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'bootleg'), h('small', {}, build ? `version ${build.version} · build ${build.commit || 'local'} · ${build.date}` : 'local build')), h('span', { class: 'muted small' }, 'MIT licensed')),
     h('h3', {}, 'Maintenance'),
@@ -574,6 +629,7 @@ const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fm
 // a server's ratings, stars and playlists ↔ bootleg (Subsonic/Navidrome); pushes go out as you rate
 // tag edits → the library (on start, on every change, and after a notes import)
 notes.store.allEdits().then(m => lib.setEdits(m)).catch(() => {});
+notes.store.addEventListener('change', e => loadDamaged(e.detail).catch(() => {}));
 notes.store.addEventListener('change', async e => { const k = e.detail; if (k === '*') lib.setEdits(await notes.store.allEdits()); else if (typeof k === 'string' && k.startsWith('file:')) lib.setEdit(k, (await notes.store.get(k)).edits); });
 // tag edits → the files themselves (desktop, off by default: Settings → Tag edits → files)
 const makeTagFiles = () => new TagFiles({ lib, store: notes.store, kv: store, keyOf: trackKey, getPlugin: getSource, sessionOf, makeSource: tauriSource,
@@ -590,6 +646,21 @@ setInterval(async () => {
 const remoteAnn = new RemoteAnnotations({ notes: notes.store, kv: store, getPlugin: getSource, sessionOf, onError: m => toast('Server: ' + m, true) });
 
 // ------------------------------------------------------------------ desktop self-test (BOOTLEG_SELFTEST=<music dir> BOOTLEG_SELFTEST_OUT=<file>): proves the packaged app can scan, tag, stream and analyse real files
+// The CD plugin against its simulator (plugin spec §7.3): rip the scratched sample disc with the real native plugin, import
+// it, and check the library shows the damage. Runs only when the sim backend is selected (BOOTLEG_CD_BACKEND=sim).
+async function selfTestCd(dir) {
+  if (!pluginRuntime.native.includes('cd')) return { skipped: 'not in this build' };
+  const cdn = nativeApi(TAURI, 'cd'), bi = await cdn.invoke('backend_info'); if (bi.backend !== 'sim') return { skipped: 'backend ' + bi.backend };
+  const { annotations } = await import('/plugins/cd/cd-logic.js'), drives = await cdn.invoke('drives'), drive = drives.find(d => d.id === 'sim:Damaged'); if (!drive) return { error: 'no sim:Damaged disc' };
+  const disc = await cdn.invoke('disc', { drive: drive.id }), dest = dir + '/CD', events = [];
+  const meta = { album: 'Sim Album', albumArtist: 'Sim Artist', tracks: [{ number: 2, title: 'Scratched' }] };
+  const job = cdn.job('rip', { drive: drive.id, request: { dest, meta, secure: { offset: 6, cache_defeat: 80, max_rounds: 12 } } }, ev => events.push(ev.type));
+  const r = await job.done, api = extApi('cd', { kind: 'plugin', native: {} });
+  await api.library.import(r.tracks.map(t => t.path), annotations(r, drive));
+  const t2 = r.tracks.find(t => t.number === 2), lt = lib._byPath.get(t2.path), rec = lt && await notes.store.get(trackKey(lt));
+  return { tracks: r.tracks.length, mb: disc.musicbrainzId, statuses: r.tracks.map(t => t.status).join(','), progress: events.includes('progress'), libTitle: lt?.title, defects: rec?.defects?.length || 0, tags: rec?.tags?.join(',') || '', prov: rec?.provenance?.kind || '', badge: damaged.has(trackKey(lt)),
+    ok: r.tracks.length === 3 && t2.status === 'damaged' && r.tracks.filter(t => t.status === 'secure').length === 2 && lt?.title === 'Scratched' && rec?.defects?.length === 1 && rec.tags.includes('rip:damaged') && rec.provenance?.kind === 'cd-rip' };
+}
 async function selfTest(dir) {
   const out = { ok: false }, wait = async (f, ms = 20000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting for ' + f); await new Promise(r => setTimeout(r, 100)); } };
   try {
@@ -632,6 +703,7 @@ async function selfTest(dir) {
       if (r.broken) throw new Error(r.broken); await player.playList([r], 0); await wait(() => player.playing && player.pos() > 0.3, 15000);
       await player.ensureStems(); await wait(() => player.mode === 'deck' && player.deck.stems.length === r.stems.length, 20000); out.package = r.title === 'Packaged Self Test' && r.stems.length >= 2; player.pause();
     } catch (e) { out.packageDiag = String(e?.message || e); }
+    out.cd = await selfTestCd(dir).catch(e => ({ error: String(e?.message || e) }));
     // the startup path itself (cache, then the background check) runs to the end on the desktop
     out.startup = await Promise.race([startLibrary().then(() => true, e => 'error: ' + (e?.message || e)), new Promise(r => setTimeout(() => r('timeout'), 30000))]);
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
@@ -646,6 +718,8 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
 (async function init() {
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
   applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
+  loadDamaged('*').catch(() => {});
+  if (TAURI) try { Object.assign(pluginRuntime, await TAURI.core.invoke('plugin_runtime')); } catch (e) { console.warn('plugin runtime', e); }
   await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {}), window.__BOOTLEG_SELFTEST ? null : extensions.init()]);
   await migrateRemoteKeys(notes.store).catch(e => console.warn('key migration', e));
   if (tagFiles && settings.tagWrite) await tagFiles.allowFolders();      // the share folders chosen for writing are opened again      // before any server sync reads ratings

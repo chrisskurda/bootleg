@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Everything the CD plugin's page needs: list drives, read discs, rip, cancel."
+permissions = ["allow-drives", "allow-disc", "allow-rip", "allow-cancel", "allow-backend-info", "allow-probe"]
