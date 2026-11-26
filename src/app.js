@@ -218,7 +218,7 @@ async function addFolderDesktop() {
   libs.addRoot(libs.target().id, dir); const srcs = await scanFolder(dir); await addSources(srcs, 'Scanned'); cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))).catch(() => {});
 }
 async function addFilesDesktop() {
-  const picked = await TAURI.dialog.open({ multiple: true, title: 'Add music files', filters: [{ name: 'Audio and songs', extensions: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'aif', 'aiff', 'caf', 'bstem', 'bsong'] }] }); if (!picked) return;
+  const picked = await TAURI.dialog.open({ multiple: true, title: 'Add music files', filters: [{ name: 'Audio and songs', extensions: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'aif', 'aiff', 'caf', 'bstem', 'bsong', 'dawproject'] }] }); if (!picked) return;
   await addSources(await sourcesFromPathsTauri(Array.isArray(picked) ? picked : [picked]));
 }
 $('#addFolder').onclick = () => (TAURI ? addFolderDesktop().catch(e => toast(String(e), true)) : $('#folderIn').click());

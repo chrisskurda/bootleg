@@ -1,9 +1,10 @@
 # The bootleg stem format
 
-> **Version 2 and the canonical spec live with the stem server:** `contracts/song_format.md` in
+> **Versions 2 and 3 and the canonical spec live with the stem server:** `contracts/song_format.md` in
 > [bootleg-stemserver](https://git.skurda.org/chris/bootleg-stemserver) — `.bstem` (a song with its stems in one file) and
-> `.bsong` (the same plus bootleg Composer's project and its history), permanent song ids. bootleg reads both, and the
-> version-1 folders described below, which remain valid.
+> `.bsong` (the same plus bootleg Composer's project and its history), permanent song ids; in version 3 both are also
+> [DAWproject](https://github.com/bitwig/dawproject) files. bootleg reads them, DAW stems exports (`.dawproject`), and
+> the version-1 folders described below, which remain valid.
 
 A **stem set** is one piece of music delivered as its parts: separate audio files for each instrument or layer (the *stems*), usually with the finished mix beside them and a little metadata. bootleg shows a stem set as **one item** in the library — the stems and the mix are never listed as separate tracks — plays it instantly from the mix, and loads the stems on demand for the stem mixer and stem-aware visualizers.
 

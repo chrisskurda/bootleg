@@ -18,6 +18,11 @@ t('stems with no mix at all are still one item', l.tracks.length === 0 && l.rend
 // 4. loose stem set (a folder of stem-named files + musicset.json)
 l = mk(['/T/musicsets/liquid/bed.flac', '/T/musicsets/liquid/pad.flac', '/T/musicsets/liquid/drums.flac', '/T/musicsets/liquid/lead.flac', '/T/musicsets/liquid/bass.flac', '/T/musicsets/liquid/musicset.json']);
 t('a loose set of stem-named files is one item', l.tracks.length === 0 && l.renders.length === 1 && l.renders[0].stems.length === 5 && l.renders[0].loose === true, JSON.stringify(names(l)));
+// 4b. a stem splitter's output (Demucs: drums / bass / other / vocals, the 6-stem model adds guitar / piano)
+l = mk(['/T/separated/htdemucs/My Song/drums.wav', '/T/separated/htdemucs/My Song/bass.wav', '/T/separated/htdemucs/My Song/other.wav', '/T/separated/htdemucs/My Song/vocals.wav']);
+t('a Demucs folder is one stem set', l.tracks.length === 0 && l.renders.length === 1 && l.renders[0].stems.length === 4 && l.renders[0].title === 'My Song', JSON.stringify(names(l)));
+l = mk(['/T/separated/htdemucs_6s/Other Song/drums.wav', '/T/separated/htdemucs_6s/Other Song/bass.wav', '/T/separated/htdemucs_6s/Other Song/other.wav', '/T/separated/htdemucs_6s/Other Song/vocals.wav', '/T/separated/htdemucs_6s/Other Song/guitar.wav', '/T/separated/htdemucs_6s/Other Song/piano.wav']);
+t('…and the 6-stem model too', l.renders.length === 1 && l.renders[0].stems.length === 6);
 // 5. an ordinary album must NOT be mistaken for a stem set
 l = mk(['/T/Album/01 Intro.flac', '/T/Album/02 Bass Is Back.flac', '/T/Album/03 Lead Me On.flac', '/T/Album/04 Pad Thai.flac', '/T/Album/05 Kick Rocks.flac']);
 t('an ordinary album (stem words only inside longer titles) stays as tracks', l.renders.length === 0 && l.tracks.length === 5);

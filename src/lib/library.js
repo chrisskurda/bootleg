@@ -16,7 +16,7 @@ const pickFields = t => Object.fromEntries(EDIT_FIELDS.map(k => [k, t[k] ?? ''])
 const blankFields = t => { for (const k of EDIT_FIELDS) t[k] = k === 'track' || k === 'disc' ? 0 : ''; };
 export const sortKey = t => [t.artist || '', t.album || '', t.disc || 0, t.track || 0, t.title || ''];
 // Stem sets: files in a library that are the *parts* of one piece of music. They are shown as one item (the piece), never as tracks.
-const STEM_WORDS = new Set(['bed', 'drums', 'drum', 'kick', 'snare', 'hats', 'hat', 'perc', 'bass', 'sub', 'lead', 'pad', 'arp', 'keys', 'vox', 'vocals', 'fx', 'riser', 'stab', 'chords', 'clap', 'crash', 'fill', 'drop', 'shaker', 'hoover', 'smpfx']);
+const STEM_WORDS = new Set(['bed', 'drums', 'drum', 'kick', 'snare', 'hats', 'hat', 'perc', 'bass', 'sub', 'lead', 'pad', 'arp', 'keys', 'vox', 'vocals', 'fx', 'riser', 'stab', 'chords', 'clap', 'crash', 'fill', 'drop', 'shaker', 'hoover', 'smpfx', 'other', 'guitar', 'piano', 'melody', 'instrumental', 'accompaniment', 'vocal', 'voice']);   // the last row: stem splitters (Demucs, Spleeter)
 const stemWord = name => name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const isStemName = name => { const w = stemWord(name); return STEM_WORDS.has(w) || (typeof window !== 'undefined' && window.VisStems ? window.VisStems.roleOf(name) !== 'other' : false); };
 const isMixName = name => /^(mix|master|final|bounce)\.[a-z0-9]+$/i.test(name);
@@ -139,7 +139,7 @@ export class Library extends EventTarget {
   async _loadRender(r) {
     if (r.pkgSrc && !r.pkg) {                                                    // a package: its directory is read every time (cheap: the end of the file), so its parts can play
       try {
-        const p = r.pkg = await openPackage(r.pkgSrc); r.mix = p.mix ? p.sourceFor(p.mix) : null; r.stems = p.stems.map(x => ({ name: stem(x.split('/').pop()), src: p.sourceFor(x) }));
+        const p = r.pkg = await openPackage(r.pkgSrc); r.mix = p.mix ? p.sourceFor(p.mix) : null; r.stems = p.stems.map(x => ({ name: p.names[x] || stem(x.split('/').pop()), src: p.sourceFor(x) }));
         r.clipsSrc = p.clips ? p.sourceFor(p.clips) : null; r.coverSrc = p.cover ? p.sourceFor(p.cover) : null; r.manifestSrc = { text: async () => JSON.stringify(p.manifest) }; r.songId = p.manifest.id || null;
         if (r.coverSrc) r.coverUrl = await r.coverSrc.urlAsync();
       } catch (e) { r.broken = String(e.message || e); }

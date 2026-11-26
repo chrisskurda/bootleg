@@ -2,7 +2,9 @@
 // uncompressed, so they are read straight out of the file — by range on the desktop, by slicing a File in the browser —
 // and a package plays without being unpacked. JSON entries may be deflated (inflated with DecompressionStream).
 // openPackage(source) → { manifest, entries: Map(path → {offset?, size, csize, method, header}), sourceFor(path) }
-export const PKG_RE = /\.(bstem|bsong)$/i;
+// A .dawproject is a song too: bootleg's own (a package under the DAW name: it carries manifest.json) or a DAW's export
+// whose tracks are each one whole audio file from time 0 (a "stems" export) — anything arranged needs bootleg Composer.
+export const PKG_RE = /\.(bstem|bsong|dawproject)$/i;
 const AUDIO = /\.(flac|wav|mp3|m4a|aac|ogg|opus|aif|aiff|caf)$/i;
 const MIME = { flac: 'audio/flac', wav: 'audio/wav', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg', aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf', json: 'application/json', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 const u16 = (b, o) => b[o] | (b[o + 1] << 8), u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0, u64 = (b, o) => u32(b, o) + u32(b, o + 4) * 2 ** 32;
@@ -48,11 +50,76 @@ export async function readEntry(reader, ent) {
   if (ent.method === 0) return raw; if (ent.method === 8) return inflate(raw); throw new Error(`zip method ${ent.method} is not supported`);
 }
 
+// ---- DAWproject (https://github.com/bitwig/dawproject): just enough XML to read project.xml / metadata.xml
+export function parseXml(text) {
+  const root = { tag: '#root', attrs: {}, children: [], text: '' }, stack = [root];
+  const ent = t => t.replace(/&(lt|gt|quot|apos|amp|#x[0-9a-f]+|#\d+);/gi, (m, e) => ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' })[e.toLowerCase()] ?? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)));
+  const re = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<[?!][^>]*>|<\/([^\s>]+)\s*>|<([^\s/>]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|([^<]+)/g;
+  for (let m; (m = re.exec(text));) {
+    const top = stack[stack.length - 1];
+    if (m[1] != null) top.text += m[1];
+    else if (m[2]) { if (stack.length > 1) stack.pop(); }
+    else if (m[3]) {
+      const attrs = {}; for (const a of m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[a[1]] = ent(a[2] ?? a[3]);
+      const el = { tag: m[3], attrs, children: [], text: '' }; top.children.push(el); if (!m[5]) stack.push(el);
+    } else if (m[6]) top.text += ent(m[6]);
+  }
+  return root;
+}
+const kids = (el, tag) => (el ? el.children.filter(c => c.tag === tag) : []);
+const kid = (el, tag) => kids(el, tag)[0] || null;
+function* walk(el) { for (const c of el.children) { yield c; yield* walk(c); } }
+const first = (el, tag) => { for (const c of walk(el)) if (c.tag === tag) return c; return null; };
+
+// the `-- bootleg --` block a bootleg song keeps in metadata.xml's comment (song_format.md)
+export function parseComment(text = '') {
+  const i = text.lastIndexOf('-- bootleg --'); if (i < 0) return { comment: text.trim(), block: {} };
+  const block = {}; for (const line of text.slice(i + 13).split(/\r?\n/)) { const k = line.indexOf(':'); if (k > 0) block[line.slice(0, k).trim().toLowerCase()] = line.slice(k + 1).trim(); }
+  return { comment: text.slice(0, i).trim(), block };
+}
+
+// project.xml (+ metadata.xml) → { application, bpm, tracks: [{id, name, volume, clips: [{time, playStart, file, external, notes}]}], markers, meta, block }
+export function readDawProject(projectXml, metadataXml) {
+  const doc = parseXml(projectXml), project = kid(doc, 'Project'); if (!project) throw new Error('project.xml has no Project');
+  const app = kid(project, 'Application'), tempo = first(kid(project, 'Transport') || { children: [] }, 'Tempo');
+  const tracks = new Map();
+  for (const t of walk(kid(project, 'Structure') || { children: [] })) {
+    if (t.tag !== 'Track') continue; const ch = kid(t, 'Channel'); if (ch && ch.attrs.role === 'master') continue;
+    const vol = ch && kid(ch, 'Volume'); tracks.set(t.attrs.id, { id: t.attrs.id, name: t.attrs.name || '', volume: vol && (vol.attrs.unit || 'linear') === 'linear' ? parseFloat(vol.attrs.value) : 1, clips: [] });
+  }
+  const arr = kid(project, 'Arrangement'), markers = [];
+  if (arr) {
+    for (const lane of walk(arr)) {
+      if (lane.tag !== 'Lanes' || !lane.attrs.track || !tracks.has(lane.attrs.track)) continue;
+      for (const clips of kids(lane, 'Clips')) for (const clip of kids(clips, 'Clip')) {
+        const audio = first(clip, 'Audio'), file = audio && kid(audio, 'File');
+        tracks.get(lane.attrs.track).clips.push({ time: parseFloat(clip.attrs.time || 0), playStart: parseFloat(clip.attrs.playStart || 0), file: file ? file.attrs.path : null, external: !!file && file.attrs.external === 'true', notes: !!first(clip, 'Notes'), seconds: audio ? parseFloat(audio.attrs.duration) : null });
+      }
+    }
+    for (const m of walk(arr)) if (m.tag === 'Marker') markers.push({ time: parseFloat(m.attrs.time || 0), name: m.attrs.name || '' });
+  }
+  const meta = {}; if (metadataXml) { const md = kid(parseXml(metadataXml), 'MetaData'); for (const c of md ? md.children : []) meta[c.tag] = c.text.trim(); }
+  const { comment, block } = parseComment(meta.Comment || '');
+  return { application: app ? `${app.attrs.name || ''} ${app.attrs.version || ''}`.trim() : '', bpm: tempo ? parseFloat(tempo.attrs.value) : null, tracks: [...tracks.values()], markers, meta, comment, block };
+}
+
+// a player can use it when every track that sounds is one whole audio file in the package, from time 0
+export function stemShaped(daw, has) {
+  const audible = daw.tracks.filter(t => t.clips.length); if (!audible.length) return false;
+  return audible.every(t => t.clips.length === 1 && !t.clips[0].notes && t.clips[0].file && !t.clips[0].external && has(t.clips[0].file) && Math.abs(t.clips[0].time) < 1e-6 && Math.abs(t.clips[0].playStart) < 1e-6);
+}
+
 // A package on disk/in the browser → the song's parts as sources the library and the player already understand.
 export async function openPackage(src) {
   const reader = src.reader(), entries = await readDirectory(reader);
-  if (!entries.has('manifest.json')) throw new Error(`${src.name}: no manifest.json`);
-  const manifest = JSON.parse(new TextDecoder().decode(await readEntry(reader, entries.get('manifest.json'))));
+  let manifest, daw = null;
+  if (entries.has('manifest.json')) manifest = JSON.parse(new TextDecoder().decode(await readEntry(reader, entries.get('manifest.json'))));
+  else if (entries.has('project.xml')) {
+    const text = async p => entries.has(p) ? new TextDecoder().decode(await readEntry(reader, entries.get(p))) : null;
+    daw = readDawProject(await text('project.xml'), await text('metadata.xml'));
+    if (!stemShaped(daw, p => entries.has(p))) throw new Error(`${src.name}: an arranged DAWproject — open it in bootleg Composer`);
+    manifest = dawManifest(daw, src.name);
+  } else throw new Error(`${src.name}: no manifest.json`);
   let blobUrls = [];
   const sourceFor = path => {
     const ent = entries.get(path); if (!ent) return null; const ext = (path.split('.').pop() || '').toLowerCase(), type = MIME[ext] || 'application/octet-stream';
@@ -67,13 +134,29 @@ export async function openPackage(src) {
     };
   };
   const paths = [...entries.keys()].filter(p => !p.startsWith('project/'));
+  const dawStems = daw ? daw.tracks.filter(t => t.clips.length) : null;
   return {
-    manifest, entries, sourceFor,
-    mix: paths.find(p => !p.includes('/') && /^(mix|master|final|bounce)\./i.test(p) && AUDIO.test(p)) || null,
-    stems: paths.filter(p => /^stems\/[^/]+$/.test(p) && AUDIO.test(p)).sort(),
+    manifest, entries, sourceFor, daw,
+    mix: daw ? null : paths.find(p => !p.includes('/') && /^(mix|master|final|bounce)\./i.test(p) && AUDIO.test(p)) || null,
+    stems: dawStems ? dawStems.map(t => t.clips[0].file) : paths.filter(p => /^stems\/[^/]+$/.test(p) && AUDIO.test(p)).sort(),
+    names: dawStems ? Object.fromEntries(dawStems.map(t => [t.clips[0].file, t.name || t.clips[0].file.split('/').pop().replace(/\.[^.]+$/, '')])) : {},
     clips: entries.has('clips.json') ? 'clips.json' : null,
     cover: paths.find(p => /^cover\.(jpe?g|png|webp)$/i.test(p)) || null,
     project: entries.has('project/history.json'),
     release: () => { blobUrls.forEach(u => URL.revokeObjectURL(u)); blobUrls = []; },
+  };
+}
+
+// what bootleg knows about a song, from a DAW's project: title and the rest from metadata.xml, levels from the tracks,
+// sections from the markers; the song id from the bootleg block when the song started in bootleg
+function dawManifest(daw, fileName) {
+  const bpm = daw.bpm || 120, sec = b => b * 60 / bpm, m = daw.meta, stems = daw.tracks.filter(t => t.clips.length);
+  const marks = [...daw.markers].sort((a, b) => a.time - b.time), len = Math.max(0, ...stems.map(t => t.clips[0].seconds || 0));
+  return {
+    format: 'dawproject', id: daw.block.id || null, title: m.Title || fileName.replace(PKG_RE, ''), artist: m.Artist || '', album: m.Album || '', year: m.Year || '', genre: m.Genre || '',
+    bpm: daw.bpm, key: daw.block.key || '', seconds: len || undefined, comment: daw.comment, application: daw.application,
+    stems_gain_db: Object.fromEntries(stems.map(t => [t.name, t.volume > 0 ? Math.round(2000 * Math.log10(t.volume)) / 100 : -96])),
+    sections: marks.map((x, i) => ({ name: x.name, start_s: sec(x.time), end_s: i + 1 < marks.length ? sec(marks[i + 1].time) : len || sec(x.time) })),
+    licences: daw.block.packs || daw.block.credits ? { packs: (daw.block.packs || '').split('; ').filter(Boolean), credits: (daw.block.credits || '').split('; ').filter(Boolean) } : undefined,
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "bootleg",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Audio player for standard tracks and stem renders, with bootleg-vizualizer visualizers. Web app with a Tauri desktop wrapper.",
   "license": "MIT",

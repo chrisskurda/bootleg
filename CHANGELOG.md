@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Added
+- **Song format 3** (`.bstem` / `.bsong` that are also DAWproject files) plays like version 2; nothing to do.
+- **DAWproject files** (`.dawproject`): bootleg's own songs saved under that name play as before; a DAW's *stems export* — every track one whole audio file from the start — plays as a stem set, with its title, artist, tempo, track levels and markers as sections, and keeps its bootleg song id when it started in bootleg (so notes and ratings follow it back from the DAW). Arranged projects are left to bootleg Composer. Opened from Finder/Explorer as an alternative to your DAW.
+- **Stem splitter output**: folders from Demucs (drums / bass / other / vocals, and the 6-stem model's guitar / piano) and Spleeter are recognised as stem sets.
 - **Windows** (x64): continuous integration builds an installer and attaches it to releases. The desktop self-test runs there too (reported, not yet blocking a release until it has proven itself on Windows).
 
 ## [0.4.0] - 2026-11-26

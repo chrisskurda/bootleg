@@ -8,7 +8,7 @@ A music player for **large libraries**, with live visualizers, stem mixing, note
 - **Mini player**: a small window with the controls, styled like the Car Thing app — it comes up when you minimize bootleg.
 - **Now playing** puts the track first: everything known about it, a timeline with the song's spectrogram, your notes as callouts and a heatmap of where you listen most, and what plays next.
 - **Live visualizers** from [bootleg-vizualizer](https://github.com/chrisskurda/bootleg-vizualizer), including per-stem visuals: a tile on Now playing (settings slide in), their own page with every setting out in the open, a mini player while you browse, fullscreen, or on another display.
-- **Songs in one file:** `.bstem` (a song with its stems) and `.bsong` (bootleg Composer's songs) play as stem sets, straight from the file.
+- **Songs in one file:** `.bstem` (a song with its stems) and `.bsong` (bootleg Composer's songs) play as stem sets, straight from the file — and so does a DAW's stems export (`.dawproject`). Stem splitter folders (Demucs, Spleeter) are stem sets too.
 - **Sources and outputs are plugins:** Subsonic/OpenSubsonic servers (Navidrome, Airsonic, Gonic) and bootleg stem servers (songs with their stems, grades and playlists) today; DLNA/UPnP casting with album art. Optional **extensions** (a Car Thing remote, a 10-band equalizer) sit behind a small API, can add their own page to the left pane, and are off by default.
 
 ## Screenshots
