@@ -24,7 +24,7 @@ for attempt in 1 2; do rm -f "$T/out.json" "$T/dlna.log"; run_timeout 150 "${RUN
 cat "$T/out.json"; echo
 node -e '
 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), skip = !!r.autoplayBlocked && !!process.env.SELFTEST_ALLOW_NO_AUTOPLAY;
-const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
+const need = skip ? ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup"] : ["ok", "cachedRescan", "restored", "notesDb", "screenOpened", "nativeTagsMatch", "tagWrite", "miniWindow", "miniClosed", "startup", "mixFirst", "stemsContinued"], bad = need.filter(k => !r[k]);
 if (skip) console.log("note: autoplay is blocked on this machine; playback-dependent checks were skipped");
 if (!skip && !(r.tracks >= 1 && r.renders >= 1 && r.stems === 5 && r.peak > 0.2 && r.remoteTracks === 2 && r.remotePeak > 0.2)) bad.push("playback/stems/remote");
 const log = (require("fs").existsSync(process.argv[2]) ? require("fs").readFileSync(process.argv[2], "utf8") : "").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)), has = f => log.some(f);

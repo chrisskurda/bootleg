@@ -247,6 +247,9 @@ async function restoreFromCache() {
     } catch (e) { console.warn('cached root unavailable', ix.root, e); }
   } renderAll();
 }
+// Startup: the cached library shows at once, then changes are looked for in the background (the window is usable throughout).
+// (0.2.0–0.3.0 skipped this on the desktop: opening files from the OS took its place instead of running beside it.)
+async function startLibrary() { await restoreFromCache(); if (settings.scanOnStart || (!lib.tracks.length && !lib.renders.length)) await syncAll(true); }
 async function syncConnection(conn, L) {
   const p = getSource(conn.plugin); if (!p) throw new Error(`The “${conn.plugin}” source plugin is not installed`);
   const key = rootKey(p, conn.id); scan.on = true; scan.text = 'Connecting…'; paintProgress();
@@ -608,6 +611,8 @@ async function selfTest(dir) {
       await TAURI.core.invoke('selftest_minimize', { on: true }); try { await wait(() => mini.alive, 8000); out.miniOnMinimize = true; } catch { await TAURI.core.invoke('mini_open'); await wait(() => mini.alive, 12000); }
       out.miniWindow = true; mini.cmd({ cmd: 'volume', to: 0.5 }); await TAURI.core.invoke('selftest_minimize', { on: false }); if (!out.miniOnMinimize) await TAURI.core.invoke('mini_close'); await wait(() => !mini.alive, 12000); out.miniClosed = true;
     } catch (e) { out.miniDiag = String(e?.message || e); }
+    // the startup path itself (cache, then the background check) runs to the end on the desktop
+    out.startup = await Promise.race([startLibrary().then(() => true, e => 'error: ' + (e?.message || e)), new Promise(r => setTimeout(() => r('timeout'), 30000))]);
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -624,7 +629,9 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   await migrateRemoteKeys(notes.store).catch(e => console.warn('key migration', e));
   if (tagFiles && settings.tagWrite) await tagFiles.allowFolders();      // the share folders chosen for writing are opened again      // before any server sync reads ratings
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
-  else if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
-  else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
+  else {
+    if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
+    startLibrary().catch(e => toast(String(e), true));      // and, in every case, the library: from the cache at once, then a look for changes
+  }
   window.__bootleg = { mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();
