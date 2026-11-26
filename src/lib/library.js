@@ -8,6 +8,11 @@ import { parseNfo } from './nfo.js';
 const dirOf = p => p.slice(0, Math.max(0, p.lastIndexOf('/')));
 const stem = n => n.replace(/\.[^.]+$/, '');
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+// Tag edits made in bootleg (stored with the notes, keyed like them — see setEdits) win over what the file or server says,
+// in bootleg only. A track's fields are always derived in this order: source tags → .nfo fill → edits.
+export const EDIT_FIELDS = ['title', 'artist', 'album', 'albumArtist', 'year', 'track', 'disc', 'genre'];
+const pickFields = t => Object.fromEntries(EDIT_FIELDS.map(k => [k, t[k] ?? '']));
+const blankFields = t => { for (const k of EDIT_FIELDS) t[k] = k === 'track' || k === 'disc' ? 0 : ''; };
 export const sortKey = t => [t.artist || '', t.album || '', t.disc || 0, t.track || 0, t.title || ''];
 // Stem sets: files in a library that are the *parts* of one piece of music. They are shown as one item (the piece), never as tracks.
 const STEM_WORDS = new Set(['bed', 'drums', 'drum', 'kick', 'snare', 'hats', 'hat', 'perc', 'bass', 'sub', 'lead', 'pad', 'arp', 'keys', 'vox', 'vocals', 'fx', 'riser', 'stab', 'chords', 'clap', 'crash', 'fill', 'drop', 'shaker', 'hoover', 'smpfx']);
@@ -33,7 +38,7 @@ export class Library extends EventTarget {
   constructor() {
     super(); this.tracks = []; this.renders = []; this._n = 0; this._seen = new Set(); this._byPath = new Map(); this._q = []; this._busy = 0; this.total = 0; this.done = 0; this._pending = false;
     this._covers = new Map(); this._coverP = new Map(); this.cache = new NullCache(); this.fileCache = new Map(); this._dirty = []; this._flushT = 0;
-    this.stats = { read: 0, cached: 0 }; this.concurrency = 6; this.useNfo = true; this.nfoFill = true; this.nfos = new Map(); this._nfoT = 0; this.scope = 'all'; this.ver = 0; this._memo = {}; this.nativeReader = null; this.includeRenders = true;
+    this.stats = { read: 0, cached: 0 }; this.concurrency = 6; this.useNfo = true; this.nfoFill = true; this.nfos = new Map(); this._nfoT = 0; this.scope = 'all'; this.ver = 0; this._memo = {}; this.nativeReader = null; this.includeRenders = true; this.edits = new Map(); this.editKey = () => null;
   }
   _changed() { this.ver++; if (this._pending) return; this._pending = true; requestAnimationFrame(() => { this._pending = false; this.dispatchEvent(new Event('change')); }); }
   async attachCache(cache) { this.cache = cache; this.fileCache = await cache.loadFiles(); for (const [k, b] of await cache.loadCovers()) this._covers.set(k, URL.createObjectURL(b)); }
@@ -107,10 +112,10 @@ export class Library extends EventTarget {
     while (this._busy < limit && this._q.length) { const j = this._q.shift(); this._busy++; j().catch(() => {}).finally(() => { this._busy--; this.done++; if (!this._busy && !this._q.length) this.flush(); this._changed(); this._pump(); }); }
   }
   // Items from a source plugin arrive already tagged (nothing to read from a file).
-  _applyRemote(t, s) { t._hay = null; const { coverUrl, remote, ...tags } = s.meta; Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; this._nfoFor(t); }
+  _applyRemote(t, s) { t._hay = null; const { coverUrl, remote, ...tags } = s.meta; blankFields(t); Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; t._src = pickFields(t); this._nfoFor(t); }
   _applyTags(t, data) {
     t._hay = null;
-    Object.assign(t, { tagged: true }, data.tags); t.track = t.track || 0; t.disc = t.disc || 0; if (!t.title) t.title = titleFromFile(t.src); t.coverUrl = data.coverKey ? this._covers.get(data.coverKey) || null : null; this._nfoFor(t);
+    blankFields(t); Object.assign(t, { tagged: true }, data.tags); t.track = t.track || 0; t.disc = t.disc || 0; if (!t.title) t.title = titleFromFile(t.src); t.coverUrl = data.coverKey ? this._covers.get(data.coverKey) || null : null; t._src = pickFields(t); this._nfoFor(t);
   }
   async _tagsOf(src) {
     let g = null; if (this.nativeReader && src.kind === 'tauri') g = await this.nativeReader(src.path);
@@ -143,7 +148,14 @@ export class Library extends EventTarget {
     const list = this.nfos.get(n.dir) || []; this.nfos.set(n.dir, [...list.filter(x => x !== n), n]); this._nfoSoon();
   }
   _nfoSoon() { if (this._nfoT) return; this._nfoT = setTimeout(() => { this._nfoT = 0; this.tracks.forEach(t => this._nfoFor(t)); this._changed(); }, 50); }
-  _nfoFor(t) {
+  _nfoFor(t) { if (t._src) { Object.assign(t, t._src); t._nfoFilled = null; } this._nfoFill(t); this._applyEdits(t); }
+  // t.orig: what the source (+ .nfo) says, kept only for edited tracks — the editor shows it, and a future tag writer diffs against it
+  _applyEdits(t) { const e = t.kind === 'track' && this.edits.get(this.editKey(t)); if (!e) { t.orig = null; t.edited = null; return; } t.orig = pickFields(t); Object.assign(t, e); t.edited = new Set(Object.keys(e)); t._hay = null; }
+  // edits: Map(notes key → { field: value }). setEdit(key, null) removes a track's edits.
+  setEdits(map) { const keys = new Set([...this.edits.keys(), ...map.keys()]); this.edits = new Map(map); this._reEdit(keys); }
+  setEdit(key, e) { const had = this.edits.has(key); if (e && Object.keys(e).length) this.edits.set(key, e); else if (had) this.edits.delete(key); else return; this._reEdit(new Set([key])); }
+  _reEdit(keys) { let n = 0; for (const k of keys) { const m = /^file:(.*)#\d*$/.exec(k), t = m && this._byPath.get(m[1]); if (t?.kind === 'track' && t._src) { this._nfoFor(t); n++; } } if (n) this._changed(); }
+  _nfoFill(t) {
     t._hay = null;
     if (!this.useNfo || !this.nfos.size) { t.nfo = null; return; }
     const dir = dirOf(t.src.path), here = this.nfos.get(dir) || [], pick = (list, kind) => list.find(x => x.parsed?.kind === kind);

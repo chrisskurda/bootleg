@@ -2,6 +2,7 @@
 // This is the reference implementation of the source-plugin contract in ./plugin.js.
 //   Auth: token auth (t = md5(password + salt), s = salt). Only the salt and token are stored — never the password.
 //   Scan: walks albums (getAlbumList2, paged) and reads each album's songs (getAlbum) — works on every server.
+//   Also: the user's playlists (getPlaylists/getPlaylist), and ratings and stars both ways (userRating/starred, setRating/star/unstar).
 import { md5 } from './md5.js';
 import { netFetch } from './net.js';
 
@@ -16,7 +17,7 @@ async function call(ses, method, params) {
   if (j.status !== 'ok') throw new Error(j.error?.message || 'Request failed'); return j;
 }
 const session = config => ({ config, base: base(config.url) });
-const item = s => ({ id: String(s.id), title: s.title || s.name || 'Untitled', artist: s.artist || '', album: s.album || '', albumArtist: s.albumArtist || s.displayAlbumArtist || '', year: s.year || '', track: s.track || 0, disc: s.discNumber || 0, genre: s.genre || (s.genres?.[0]?.name) || '', duration: s.duration || 0, size: s.size || 0, suffix: s.suffix || 'mp3', changed: s.created ? Date.parse(s.created) || 0 : 0, coverId: s.coverArt || s.albumId || '', bitrate: s.bitRate || 0 });
+const item = s => ({ id: String(s.id), title: s.title || s.name || 'Untitled', artist: s.artist || '', album: s.album || '', albumArtist: s.albumArtist || s.displayAlbumArtist || '', year: s.year || '', track: s.track || 0, disc: s.discNumber || 0, genre: s.genre || (s.genres?.[0]?.name) || '', duration: s.duration || 0, size: s.size || 0, suffix: s.suffix || 'mp3', changed: s.created ? Date.parse(s.created) || 0 : 0, coverId: s.coverArt || s.albumId || '', bitrate: s.bitRate || 0, rating: s.userRating || 0, starred: !!s.starred, path: s.path || '' });      // path: real only if the server reports it (Navidrome: Report Real Path)
 
 export const subsonic = {
   id: 'subsonic', name: 'Subsonic / OpenSubsonic', description: 'Navidrome, Airsonic, Gonic and other Subsonic-compatible servers.',
@@ -42,6 +43,13 @@ export const subsonic = {
       offset += albums.length; if (albums.length < PAGE) break;
     }
   },
+  async playlists(ses) {
+    const list = (await call(ses, 'getPlaylists')).playlists?.playlist || [];
+    return Promise.all(list.map(async p => ({ id: String(p.id), name: p.name || 'Playlist', owner: p.owner || '', items: ((await call(ses, 'getPlaylist', { id: p.id })).playlist?.entry || []).map(e => String(e.id)) })));
+  },
+  setRating: (ses, id, stars) => call(ses, 'setRating', { id, rating: stars }),        // whole stars 1–5; 0 clears
+  setStarred: (ses, id, on) => call(ses, on ? 'star' : 'unstar', { id }),
+  rescan: ses => call(ses, 'startScan'),                                              // after bootleg wrote tags into the server's files
   streamUrl: (ses, it) => url(ses, 'stream', { id: it.id, format: 'raw' }),
   coverUrl: (ses, it, px = 512) => it.coverId ? url(ses, 'getCoverArt', { id: it.coverId, size: px }) : '',
   fetch: (ses, u, init) => netFetch(u, init),

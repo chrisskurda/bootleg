@@ -4,7 +4,11 @@ import { MODES, STATUSES } from './libraries.js';
 import { albumKey } from './album-details.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
-export const trackKey = t => !t ? null : t.kind === 'render' ? 'render:' + t.dir : 'file:' + (t.src?.path || t.title) + '#' + (t.src?.size ?? '');
+// A server track's id is stable across tag edits, so its key leaves the size out (writing tags changes the size). A local
+// file keeps the size in its key; when bootleg writes a file's tags it moves the records to the new key (NotesStore.rekey).
+export const trackKey = t => !t ? null : t.kind === 'render' ? 'render:' + t.dir : 'file:' + (t.src?.path || t.title) + '#' + (t.src?.kind === 'remote' ? '' : (t.src?.size ?? ''));
+// Records of server tracks saved under the older key (with the size) move to the new one, once.
+export async function migrateRemoteKeys(store) { const moves = {}; for (const { key } of await store.b.all()) { const m = /^t:(file:[\w-]+:[^/]+\/.+#)\d+$/.exec(key); if (m) moves[key.slice(2)] = m[1]; } return store.rekey(moves); }
 const KIND_LABEL = { 'vinyl-rip': 'Vinyl rip', 'cd-rip': 'CD rip (retail)', 'mix-cd-rip': 'Mix CD rip', 'live-recording': 'Live recording', 'digital-purchase': 'Digital purchase', streaming: 'Streaming', 'studio-recording': 'Studio recording', mixdown: 'Mixdown', demo: 'Demo', rehearsal: 'Rehearsal', 'stem-render': 'Stem render', other: 'Other' };
 
 export function stars(h, value, onset) {
@@ -113,8 +117,8 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
         ...r.notes.slice(0, 4).map(n => h('div', { class: 'nc-note' }, h('span', { class: 'chip' }, n.at != null ? fmt(n.at) : 'whole'), ' ', n.text)), r.notes.length > 4 ? h('div', { class: 'muted small' }, `+ ${r.notes.length - 4} more`) : '');
     });
     $('#noteCards').replaceChildren(...rows); $('#emptyNotes').hidden = rows.length > 0;
-    const pls = await store.playlists(); $('#plList').replaceChildren(...pls.map(p => h('div', { class: 'ncard' }, h('div', { class: 'nc-head' }, h('b', {}, p.name), h('span', { class: 'muted' }, `${p.items.length} tracks`),
-      h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'), h('button', { class: 'mini', onclick: () => store.deletePlaylist(p.id).then(paintLists) }, 'delete')))));
+    const pls = await store.playlists(); $('#plList').replaceChildren(...pls.map(p => h('div', { class: 'ncard' }, h('div', { class: 'nc-head' }, h('b', {}, p.name), p.server ? h('span', { class: 'chip', title: 'A copy of a playlist on your server, refreshed on every sync' }, '☁ server') : '', h('span', { class: 'muted' }, `${p.items.length} tracks`),
+      h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'), p.server ? '' : h('button', { class: 'mini', onclick: () => store.deletePlaylist(p.id).then(paintLists) }, 'delete')))));
     $('#emptyPl').hidden = pls.length > 0;
   }
   $('#noteSearch').oninput = paintLists; $('#noteMin').onchange = paintLists; $('#noteTag').onchange = paintLists; $('#noteStatus').onchange = paintLists;

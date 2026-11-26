@@ -79,9 +79,20 @@ export class Player extends EventTarget {
   // disconnected from the speakers, the analysers stay connected.
   setLocalOutput(on) { this.localOut = on !== false; this._applyOut(); }
   _applyOut() {
-    const ctx = this.feed.ctx; if (!ctx) return; const node = this.mode === 'deck' ? this.deck.master : this.audio._mes; if (!node) return;
-    try { if (this.localOut === false) node.disconnect(ctx.destination); else { node.disconnect(ctx.destination); node.connect(ctx.destination); } } catch { /* not connected */ }
+    const ctx = this.feed.ctx; if (!ctx) return; const node = this.mode === 'deck' ? this.deck.master : this.audio._mes; if (!node) return; const bus = this._bus();
+    for (const n of [this.deck.master, this.audio._mes]) if (n) { try { n.disconnect(ctx.destination); } catch { /* not connected */ } try { n.disconnect(bus); } catch { /* not connected */ } }
+    if (this.localOut !== false) node.connect(bus);
   }
+  // What reaches the speakers goes through one bus, where extensions can insert processing (an equalizer, …). The analysers
+  // (visualizer, meters) listen before it. insert(input, output = input) → a function that takes it out again.
+  _bus() {
+    const ctx = this.feed.ctx; if (!this.bus) { this.bus = ctx.createGain(); this.inserts = []; this._wire(); } return this.bus;
+  }
+  _wire() {
+    const ctx = this.feed.ctx; let prev = this.bus; try { prev.disconnect(); } catch { /* fresh */ }
+    for (const x of this.inserts) { try { x.out.disconnect(); } catch { /* fresh */ } prev.connect(x.in); prev = x.out; } prev.connect(ctx.destination);
+  }
+  insert(input, output = input) { this._bus(); const x = { in: input, out: output }; this.inserts.push(x); this._wire(); return () => { const i = this.inserts.indexOf(x); if (i < 0) return; this.inserts.splice(i, 1); try { x.out.disconnect(); } catch { /* gone */ } this._wire(); }; }
   // Some webviews cannot play a stream the element is pointed at (WebKitGTK/GStreamer and asset://, cross-origin servers without
   // CORS, ...). When the element errors — or goes silent for too long — fetch the file ourselves (the asset protocol / the desktop
   // HTTP plugin can) and play it from a blob: URL. This never blocks playback from starting: the element is tried first, at once.

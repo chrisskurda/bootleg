@@ -47,6 +47,14 @@ async fn read_tags_batch(app: AppHandle, paths: Vec<String>, known_covers: Vec<S
     tauri::async_runtime::spawn_blocking(move || tags::read_batch(paths, known_covers)).await.map_err(|e| e.to_string())
 }
 
+/// Writes tag edits into an opened file (a library folder, or the folder a server's music is shared from).
+#[tauri::command]
+async fn write_tags(app: AppHandle, path: String, fields: serde_json::Map<String, serde_json::Value>) -> Result<tags::Written, String> {
+    let p = PathBuf::from(&path);
+    if !app.asset_protocol_scope().is_allowed(&p) || !p.is_file() { return Err(format!("not an opened file: {path}")); }
+    tauri::async_runtime::spawn_blocking(move || tags::write(&p, &fields)).await.map_err(|e| e.to_string())?
+}
+
 // ---- cast / network outputs ----------------------------------------------------------------------------------------
 /// Makes an already-allowed local file fetchable from other devices on the network; returns its LAN URL.
 #[tauri::command]
@@ -152,7 +160,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done])
         .setup(move |app| {
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);

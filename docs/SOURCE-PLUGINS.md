@@ -13,6 +13,9 @@ export const myService = {
   streamUrl(session, item) → url,              // what <audio> plays
   coverUrl(session, item, px) → url,           // optional
   fetch(session, url, init) → Response,        // optional: authenticated fetch (blob fallback)
+  playlists(session) → [{ id, name, owner, items: [itemId] }],  // optional: copies shown in Playlists, refreshed each sync
+  setRating(session, itemId, stars),           // optional: whole stars 0–5; bootleg ratings then sync both ways
+  setStarred(session, itemId, on),             // optional: the server's star/favourite ↔ the bootleg tag "starred"
 };
 // Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate }
 ```

@@ -33,4 +33,14 @@ t('loading in small slices never splits a stem set (40 sets + 1 track)', l.rende
 // 8. lists: sets and tracks are merged, sets can be hidden
 l = mk(['/T/a/mix.flac', '/T/a/manifest.json', '/T/a/stems/kick.flac', '/T/a/stems/bass.flac', '/T/solo.flac']); t('the item list contains the set once, plus the track', l.visibleItems.length === 2 && l.sortedTracks().length === 2);
 l.includeRenders = false; l._changed(); t('…and sets can be hidden from the list', l.visibleItems.length === 1 && l.sortedTracks().length === 1 && l.renders.length === 1);
+// 9. tag edits made in bootleg win over the file's / server's tags (in bootleg only), survive re-tagging and .nfo passes, and revert
+l = mk(['/E/a.flac', '/E/b.flac']); l.editKey = x => 'file:' + x.src.path + '#' + x.src.size; const [ea, eb] = l.tracks;
+l._applyTags(ea, { tags: { title: 'Teh Song', artist: 'Band', album: 'Albm', year: 2020 } }); l._applyTags(eb, { tags: { title: 'Other', artist: 'Band', album: 'Albm' } });
+l.setEdits(new Map([['file:/E/a.flac#1000', { title: 'The Song', album: 'Album' }]]));
+t('an edit shows instead of the tag, and the original is kept beside it', ea.title === 'The Song' && ea.album === 'Album' && ea.artist === 'Band' && ea.orig.title === 'Teh Song' && ea.edited.has('title') && !eb.edited);
+l._applyTags(ea, { tags: { title: 'Teh Song', artist: 'Band', album: 'Albm' } }); l._nfoSoon(); l.tracks.forEach(x => l._nfoFor(x));
+t('re-reading the tags (a rescan) and .nfo passes keep the edit; a field the source dropped is not left behind', ea.title === 'The Song' && ea.album === 'Album' && ea.year === '');
+l.setEdit('file:/E/a.flac#1000', { album: 'Album' }); t('dropping one field\'s edit reverts just that field', ea.title === 'Teh Song' && ea.album === 'Album');
+l.setEdit('file:/E/a.flac#1000', null); t('removing all edits restores the source tags', ea.title === 'Teh Song' && ea.album === 'Albm' && !ea.orig && !ea.edited);
+l.setEdit('file:/E/z.flac#1000', { title: 'x' }); t('an edit for a track that is not in the library is kept for later and harms nothing', l.edits.has('file:/E/z.flac#1000'));
 setTimeout(() => { console.log(bad ? `\n${bad} FAILED` : '\nall library tests pass'); process.exit(bad ? 1 : 0); }, 50);

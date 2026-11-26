@@ -16,8 +16,13 @@
 //     streamUrl(session, item)   → URL string           // what <audio> plays
 //     coverUrl(session, item, px)→ URL string | ''      // optional
 //     fetch(session, url, init)  → Response             // optional: authenticated fetch for the blob fallback (see net.js)
+//     async playlists(session)   → [{ id, name, owner, items: [itemId…] }]   // optional: shown (read-only) in Playlists
+//     async setRating(session, itemId, stars)          // optional, whole stars 0–5: bootleg ratings sync both ways
+//     async setStarred(session, itemId, on)            // optional: the server's favourite/star ↔ the bootleg tag "starred"
+//     async rescan(session)                            // optional: ask the server to re-read its files (after bootleg wrote tags)
 //   }
-//   Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate }
+//   Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate, rating?, starred?, path? }
+//     `path`: the file's real path inside the server's music folder, when the server reports it (used to write tag edits to files)
 //     `id` must be stable; `changed` (ms or any increasing token) lets rescans notice edits.
 //
 // How it plugs in: items become library "sources" (./remote.js) that arrive already tagged, are cached like files, shown in

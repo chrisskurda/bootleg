@@ -1,4 +1,4 @@
-import { NotesStore, toM3U, parseM3U, matchEntries } from '../src/lib/notes.js';
+import { NotesStore, MemoryBackend, toM3U, parseM3U, matchEntries } from '../src/lib/notes.js';
 let bad = 0; const t = (n, ok, note = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${note ? '   ' + note : ''}`); if (!ok) bad++; };
 const a = new NotesStore(), k = 'local:vinyl-side-a';
 await a.setRating(k, 4.3); t('rating clamps to half stars', (await a.get(k)).rating === 4.5);
@@ -15,4 +15,13 @@ const m3u = toM3U('Mix', tracks.map(x => ({ ...x, path: '/music/' + x.src.name }
 t('M3U round trip keeps name, artist/title, order', p.name === 'Mix' && p.items.length === 2 && p.items[0].artist === 'The Quarterlies' && p.items[0].title === 'Café' && p.items[0].path === '01 Café.flac');
 t('entries resolve by file name, then artist+title, then title', matchEntries(parseM3U('#EXTINF:1,The Isobars - Low Pressure\nelsewhere/zzz.mp3\n01 Café.flac\n').items, tracks).map(m => m.track?.title).join() === 'Low Pressure,Café');
 const pl = await a.savePlaylist({ name: 'Road', items: ['local:1', 'local:2'] }); t('playlists persist and export with the notes file', (await a.playlists()).length === 1 && (await a.export()).playlists[0].id === pl.id);
+{ // rekey: a file whose tags bootleg wrote (new size) keeps its notes, ratings and playlist places; two records merge
+  const r = new NotesStore(new MemoryBackend()); await r.setRating('file:/m/a.flac#100', 4); await r.addNote('file:/m/a.flac#100', { text: 'old note' });
+  await r.addNote('file:/m/a.flac#120', { text: 'new note' }); await r.savePlaylist({ name: 'P', items: ['file:/m/a.flac#100', 'x'] });
+  const n = await r.rekey({ 'file:/m/a.flac#100': 'file:/m/a.flac#120' }), got = await r.get('file:/m/a.flac#120');
+  t('rekey moves a record, merging with one already at the new key (notes from both kept)', n === 1 && got.rating === 4 && got.notes.length === 2 && got.key === 'file:/m/a.flac#120' && (await r.get('file:/m/a.flac#100')).notes.length === 0);
+  t('rekey moves playlist entries too', (await r.playlists())[0].items.join() === 'file:/m/a.flac#120,x');
+  await r.setEdits('file:/m/a.flac#120', { title: 'T', year: 1999 }); await r.setEdits('file:/m/a.flac#120', { year: null });
+  t('tag edits: set, drop one field', JSON.stringify((await r.get('file:/m/a.flac#120')).edits) === '{"title":"T"}' && (await r.allEdits()).size === 1);
+}
 console.log(bad ? `\n${bad} FAILED` : '\nall notes tests pass'); process.exit(bad ? 1 : 0);

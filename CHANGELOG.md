@@ -7,16 +7,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **Now playing, redesigned around the track**: a large cover and everything bootleg knows about it (track, year, genre, BPM, key, file format and bitrate, where it lives, lyrics), and *Up next* from the queue. A **timeline** under it shows the song's spectrogram (drawn once per recording and remembered), your timed notes as callouts and ranges as bands (click one to jump there), and a **listening heatmap** of the parts you actually play most. Click anywhere on it to seek.
+- **Visualizer page** in the left pane, with every pack and Look & FX setting out in the open. On Now playing the visualizer is a tile: ⚙ slides its settings in (also in fullscreen), ⤢ opens the page, ⧉ pops it out to another window or display, ⛶ goes fullscreen, and ▭ keeps it as a **mini player** in the corner while you browse. The pack never reloads when it moves between them.
+- **Extensions can add pages to the left pane** (`api.ui.addView`) and **process the audio** on its way to the speakers (`api.audio.insert`). Included, off by default: a **10-band equalizer** with presets and a preamp.
+- Settings → *Now playing*: spectrogram for local files and server tracks, local files only, or off; the mini visualizer.
+- **Write tag edits into files** (desktop, off by default: *Settings → Tag edits → files*). Review each edit (old → new, and its file) and write it now, or approve it for a schedule (every N hours, only when the folders are reachable). Server tracks are written through the folder the server's music is shared from (e.g. an SMB share): found by the path the server reports (Navidrome: turn on *Report Real Path*), else by exact file size, never guessed. Files are replaced in one rename; the server is asked to rescan, and bootleg's edit is dropped once the server reports the new tags. See the README.
+- **Subsonic / Navidrome**: the server's playlists appear in Playlists (marked ☁, refreshed on every sync). Ratings and stars sync both ways: server ratings and stars show up in bootleg, and rating a track or tagging it `starred` in bootleg updates the server (half stars are sent rounded). If a value changed on both sides since the last sync, the server wins.
+- **Tag edits in bootleg**: edit a track's title, artist, album, album artist, year, track, disc and genre, or an album's shared fields at once ("✎ Edit album"). Edits are stored with your notes (and exported with them) and override what the file or server says, in bootleg only; the files and the server are not changed. Edited tracks are marked ✎ and each field can be reverted.
 - **Settings → Playing**: choose what clicking an album does (show its tracks — the new default — or play it), and how playing treats the queue: *replace* (the album, playlist or list becomes the queue; as before) or *build a queue* (double-click adds to the end and starts if nothing is playing; ▶ plays now, inserted after the current track, keeping the rest).
 - Album grid: a click unfolds the album's tracks in a panel under its row (Esc or ✕ closes it); a double-click plays it and keeps the tracks open. List, cover flow and split views follow the same click / double-click rule.
 - Desktop: open audio files from Finder or Explorer (“Open With → bootleg”, or bootleg as the default player) or the command line; they play straight away, even on a cold start. bootleg registers as an alternate handler for mp3, flac, m4a/aac, ogg/opus, wav, aiff and caf, so it never takes over the default player on its own. On Windows and Linux a second launch hands its files to the running app.
 - README screenshots, a synthetic demo library (`npm run demo-library`) and a script that drives the app to capture them (`npm run screenshots`).
 
 ### Changed
+- The bootleg wordmark matches the Car Thing app: “boot” plain, “**leg**” bold in the accent colour.
+- A server track's notes key no longer includes the file size (writing tags changes it; the server's id does not). Existing notes, ratings and playlist entries move to the new key automatically on start.
 - The stem-folder layout is now documented as the **bootleg stem format** (`docs/STEM-FORMAT.md`): version 1, with an optional `"format": "bootleg-stem", "version": 1` in `manifest.json`. The app calls these **stem sets**. Nothing changes for existing folders.
 - The README describes what bootleg is and how to run it.
 
 ### Fixed
+- A track row's hover buttons no longer get cut off (they overflowed the narrow time column).
 - Tracks played through the download fallback (servers without CORS, e.g. Navidrome, and WebKit/Linux) now carry their audio type; without it WebKit could refuse the file and nothing played.
 - The notes panel no longer rebuilds while you are typing in one of its fields (a rating, status or tag change elsewhere could wipe what you had just typed).
 

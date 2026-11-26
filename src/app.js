@@ -8,9 +8,13 @@ import { MemoryBackend } from '/lib/notes.js';
 import { VirtualList } from '/lib/vlist.js';
 import { albumPane } from '/lib/album-pane.js';
 import { albumKey } from '/lib/album-details.js';
-import { initNotes, trackKey, stars } from '/lib/notes-ui.js';
+import { initNotes, trackKey, stars, migrateRemoteKeys } from '/lib/notes-ui.js';
 import { getSource, listSources } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
+import { RemoteAnnotations } from '/lib/sources/annotations.js';
+import { openTagEditor } from '/lib/tag-editor.js';
+import { TagFiles } from '/lib/tag-files.js';
+import { openTagReview } from '/lib/tag-files-ui.js';
 import { Extensions } from '/lib/extensions.js';
 import { Outputs } from '/lib/outputs/manager.js';
 import { getOutput } from '/lib/outputs/index.js';
@@ -18,6 +22,9 @@ import { readTags } from '/lib/tags.js';
 import { Libraries, MODES } from '/lib/libraries.js';
 import { LibCache, NullCache } from '/lib/cache.js';
 import { makeNativeTagReader, AUDIO_RE, wanted, sourcesFromFiles, webSource, tauriSource, scanFolderTauri, sourcesFromPathsTauri } from '/lib/source.js';
+import { initNowView } from '/lib/now-view.js';
+import { VizDock } from '/lib/viz-dock.js';
+import { ListenHeat, SpectroCache, IdbKV, MapKV } from '/lib/listen-heat.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -26,17 +33,35 @@ const TAURI = window.__TAURI__;
 const lib = new Library(), feed = new AudioFeed(), player = new Player(feed);
 const viz = new VizHost({ stage: $('#vizStage'), packSelect: $('#packSelect'), paramsEl: $('#packParams'), lookEl: $('#lookParams'), feed, player });
 function toast(msg, bad = false) { const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg); document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 3000); }
+lib.editKey = trackKey;      // tag edits made in bootleg are stored with the notes, under the same key
+const editTags = (ts, title) => openTagEditor(ts, { h, store: notes.store, keyOf: trackKey, toast, title });
 const acts = playActions(player, { model: () => settings.playModel, toast, plural });       // what ▶ / double-click do (Settings → Playing)
 const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test mode: the shell injects this flag, and nothing below touches the real settings, library or notes
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
 // ------------------------------------------------------------------ views
 let view = 'tracks';
-function show(v) {
-  view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v));
-  v === 'now' ? viz.start() : viz.stop(); if (v === 'now') { buildStems(); ensureForViz(); } if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } renderAll();
+// The visualizer stage sits over the Now playing tile or the Visualizer page, or floats as a mini player elsewhere (viz-dock.js).
+const vizDock = new VizDock({ stage: $('#vizStage'), area: $('#main'), onChange: () => syncViz() });
+// analysing while the stage shows, and on Now playing even with the tile scrolled away (the stem meters use the same analysis)
+const vizShown = () => vizDock.visible || view === 'now';
+function syncViz() { vizShown() ? viz.start() : viz.stop(); ensureForViz(); }
+function placeViz() {
+  const home = view === 'viz', side = $('#vizSide'); (home ? $('#vizSideHome') : $('#vizDrawer')).append(side); if (home) setDrawer(false);
+  vizDock.place(view === 'now' ? $('#nowVizSlot') : home ? $('#vizSlot') : null, settings.vizFloat && !!player.item);
+  $('#vizExpand').hidden = home; $('#vizGear').hidden = home; $('#vizFloat').classList.toggle('on', !!settings.vizFloat);
 }
-$$('.nav').forEach(b => b.onclick = () => show(b.dataset.view)); $('#np').onclick = () => show('now');
+function setDrawer(open) { $('#vizDrawer').hidden = !open; $('#vizStage').classList.toggle('drawer', open); $('#vizGear').classList.toggle('on', open); }
+function show(v) {
+  view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v)); placeViz();
+  syncViz(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } extViews.get(v)?.shown?.(); renderAll();
+}
+const navClick = b => { b.onclick = () => show(b.dataset.view); }; $$('.nav').forEach(navClick); $('#np').onclick = () => show('now');
+$('#vizGear').onclick = () => setDrawer($('#vizDrawer').hidden); $('#drawerClose').onclick = () => setDrawer(false);
+$('#vizExpand').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); show('viz'); };
+$('#vizFloat').onclick = () => { settings.vizFloat = !settings.vizFloat; applySettings(); placeViz(); toast(settings.vizFloat ? 'The mini visualizer stays in the corner while you browse' : 'Mini visualizer off'); };
+$('#vizPop').onclick = () => $('#screenBtn').click();
+addEventListener('fullscreenchange', () => vizDock.update());
 
 // ------------------------------------------------------------------ lists
 let shown = [];
@@ -44,8 +69,8 @@ const cover = (url, cls = 'cover') => url ? h('img', { class: cls, src: url, alt
 function trackRow(t, i) {
   return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(shown, i, true) },
     h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => acts.now(shown, i, true) }, '▶')),
-    h('span', { class: 'tt' }, t.title, t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
-    h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
+    h('span', { class: 'tt' }, t.title, t.edited ? h('span', { class: 'chip', title: 'Tags edited in bootleg (the file/server is unchanged)' }, '✎') : '', t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
+    h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, t.kind === 'track' ? h('button', { class: 'mini', title: 'Edit tags (in bootleg)', onclick: () => editTags([t]) }, 'edit') : '', h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
 const trackVL = new VirtualList({ scroller: $('#view-tracks'), container: $('#trackList'), rowH: 38, render: (t, i) => trackRow(t, i) });
 function renderTracks() {
@@ -67,11 +92,11 @@ const hms = s => { s = Math.round(s); const hh = Math.floor(s / 3600), m = Math.
 function albumTracks(a) {
   return h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(a.tracks, i, true) },
     h('span', { class: 'n' }, String(t.track || i + 1)), h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist && t.artist !== a.artist ? t.artist : ''), h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''),
-    h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')))));
+    h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', title: 'Edit tags (in bootleg)', onclick: () => editTags([t]) }, 'edit'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')))));
 }
 function albumActions(a) {
   return h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play album'),
-    h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'));
+    h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'), h('button', { class: 'btn', title: 'Album, artist, year and genre for every track (in bootleg)', onclick: () => editTags(a.tracks, `Edit album — ${a.album}`) }, '✎ Edit album'));
 }
 function albumHead(a) { const i = albumInfo(a); return h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover big'), h('div', {}, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, i.year, plural(a.tracks.length, 'track'), i.dur ? hms(i.dur) : ''].filter(Boolean).join(' · ')), albumActions(a))); }
 // Grid: an opened album unfolds in a full-width panel under its row (the cards after it backfill the row — CSS
@@ -140,7 +165,7 @@ function renderSplit(list) {
 }
 async function paintSplitPane(list = lib.albums().filter(a => { const q = $('#search').value.toLowerCase(); return !q || (a.album + ' ' + a.artist).toLowerCase().includes(q); })) {
   const a = list.find(x => x.key === splitKey); if (!a) return; const tok = ++splitToken;
-  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, trackStore: t => notes.store.get(trackKey(t)) });
+  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, editTags, trackStore: t => notes.store.get(trackKey(t)) });
   if (tok === splitToken) { const pane = $('#splitPane'), keep = pane.scrollTop; pane.replaceChildren(el); pane.scrollTop = keep; }
 }
 $('#view-albums').addEventListener('scroll', () => { const v = $('#view-albums'); if (settings.albumView === 'grid' && $('#albumGrid').dataset.more && v.scrollTop + v.clientHeight > v.scrollHeight - 700) { gridLimit += 300; renderAlbums(); } }, { passive: true });
@@ -167,7 +192,7 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 // ------------------------------------------------------------------ adding music
 const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { ...PLAY_DEFAULTS, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, spectro: 'all', vizFloat: false, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -200,7 +225,7 @@ $('#addFiles').onclick = () => (TAURI ? addFilesDesktop().catch(e => toast(Strin
 $('#folderIn').onchange = e => { addSources(sourcesFromFiles(e.target.files), 'Scanned'); e.target.value = ''; };
 $('#filesIn').onchange = e => { addSources(sourcesFromFiles(e.target.files)); e.target.value = ''; };
 const scopeRoots = () => { const ls = libs.active === 'all' ? libs.list : [libs.get(libs.active)].filter(Boolean); return ls.flatMap(L => [...L.roots, ...L.connections]).map(x => ({ root: x })); };
-async function forgetLibrary(L) { for (const c of [...L.connections]) { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); } for (const r of [...L.roots]) { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); } lib.dropLibrary(L.id); }
+async function forgetLibrary(L) { for (const c of [...L.connections]) { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); } for (const r of [...L.roots]) { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); } lib.dropLibrary(L.id); }
 $('#forget').onclick = async () => { const targets = libs.active === 'all' ? libs.list : [libs.get(libs.active)]; for (const L of targets) await forgetLibrary(L); player.clear(); renderAll(); paintLibSel(); toast(libs.active === 'all' ? 'All libraries forgotten' : 'Library forgotten'); };
 function paintLibSel() {
   const sel = $('#libSel'); sel.replaceChildren(...libs.list.map(l => h('option', { value: l.id, selected: l.id === libs.active }, `${l.name}${l.mode === 'studio' ? ' ✎' : ''}`)), libs.list.length > 1 ? h('option', { value: 'all', selected: libs.active === 'all' }, 'All libraries') : null); sel.hidden = false; sel.value = libs.active;
@@ -224,7 +249,14 @@ async function restoreFromCache() {
 async function syncConnection(conn, L) {
   const p = getSource(conn.plugin); if (!p) throw new Error(`The “${conn.plugin}” source plugin is not installed`);
   const key = rootKey(p, conn.id); scan.on = true; scan.text = 'Connecting…'; paintProgress();
-  try { const srcs = await scanConnection(p, p.session(conn.config), conn.id, { onProgress: t => { scan.text = t; } }); const before = lib.tracks.length; lib.add(srcs, L.id); const removed = lib.removeMissing(key, new Set(srcs.map(x => x.path)), L.id); await cache.putIndex(key, srcs.map(toIndexEntry)); return { added: Math.max(0, lib.tracks.length - before), removed, total: srcs.length }; }
+  try {
+    const ses = p.session(conn.config), srcs = await scanConnection(p, ses, conn.id, { onProgress: t => { scan.text = t; } }); const before = lib.tracks.length; lib.add(srcs, L.id); const removed = lib.removeMissing(key, new Set(srcs.map(x => x.path)), L.id); await cache.putIndex(key, srcs.map(toIndexEntry));
+    // ratings, stars and playlists the server keeps (a failure here never fails the scan itself)
+    scan.text = 'Syncing ratings and playlists…'; const tracks = srcs.map(x => { const t = lib._byPath.get(x.path); return t?.kind === 'track' ? { key: trackKey(t), item: x.remote.item } : null; }).filter(Boolean);
+    try { await remoteAnn.pull(p, conn.id, ses, tracks); } catch (e) { toast(`${conn.title}: could not sync ratings/playlists (${e.message || e})`, true); }
+    await tagFiles?.prune().catch(() => {});      // edits the server now agrees with (it re-read files bootleg wrote) are no longer needed
+    return { added: Math.max(0, lib.tracks.length - before), removed, total: srcs.length };
+  }
   finally { scan.on = false; }
 }
 let syncing = false;
@@ -272,12 +304,12 @@ function updateBar() {
   const c = $('#npCover'); if (it && it.coverUrl) { c.src = it.coverUrl; c.hidden = false; } else c.hidden = true;
   $('#shuffle').classList.toggle('on', player.shuffle); const rp = $('#repeat'); rp.classList.toggle('on', player.repeat !== 'off'); rp.textContent = player.repeat === 'one' ? '⟲1' : '⟲'; rp.title = 'Repeat: ' + player.repeat;
   $('#qCount').textContent = player.queue.length || ''; $$('.row').forEach(r => r.classList.toggle('playing', it && r.dataset.id === it.id)); $('#vizMsg').textContent = it ? '' : 'Play something to see it react. Until then the pack plays its idle demo.';
-  renderQueue(); if (view === 'now') { buildStems(); ensureForViz(); }
+  $('#stageTitle').textContent = it ? `${it.title}${it.artist ? ' — ' + it.artist : ''}` : ''; renderQueue(); buildStems(); placeViz(); ensureForViz();
 }
 player.addEventListener('change', updateBar);
 player.addEventListener('playerror', e => toast(e.detail, true));      // never fail silently: say why nothing is playing
 let drag = false; seek.oninput = () => { drag = true; }; seek.onchange = () => { const d = player.dur(); if (d) player.seek(seek.value / 1000 * d); drag = false; };
-(function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
+(function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; vizDock.update(); $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
 playBtn.onclick = () => { if (!player.item) { if (shown.length) player.playList(shown, 0); else if (lib.renders.length) player.playList(lib.renders, 0); return; } player.toggle(); };
 $('#prev').onclick = () => player.prev(); $('#next').onclick = () => player.next();
 $('#shuffle').onclick = () => player.setShuffle(!player.shuffle); $('#repeat').onclick = () => player.setRepeat({ off: 'all', all: 'one', one: 'off' }[player.repeat]);
@@ -310,13 +342,13 @@ function buildStems() {
   }));
 }
 // A stem-aware visualizer (pack.json usesStems) is on screen: it deserves the real stems.
-function ensureForViz() { const it = player.item; if (it && it.kind === 'render' && settings.stemsLoad === 'visualizer' && view === 'now' && viz.pack?.usesStems) player.ensureStems(); }
+function ensureForViz() { const it = player.item; if (it && it.kind === 'render' && settings.stemsLoad === 'visualizer' && vizShown() && viz.pack?.usesStems) player.ensureStems(); }
 viz.onPack = ensureForViz;
 function paintMeters() {
   if (view !== 'now' || !stemEls.length || !viz.lastA || !viz.lastA.stems) return; const by = Object.fromEntries(viz.lastA.stems.map(s => [s.name, s]));
   for (const row of stemEls) { const st = by[row.deckStem.name]; if (!st) continue; row._r.meter.style.width = Math.round(st.level * 100) + '%'; row._r.lbl.textContent = st.label ? `${st.label}${st.kit ? ' — ' + st.kit : ''}` : ''; }
 }
-$('#fsBtn').onclick = () => viz.fullscreen(); $('#lookReset').onclick = () => viz.resetLook();
+$('#fsBtn').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : viz.fullscreen()); $('#lookReset').onclick = () => viz.resetLook();
 
 // ------------------------------------------------------------------ keyboard
 addEventListener('keydown', e => {
@@ -327,17 +359,29 @@ addEventListener('keydown', e => {
   else if (view === 'albums' && settings.albumView === 'flow' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { flowIdx += e.key === 'ArrowRight' ? 1 : -1; renderAlbums(); }
   else if (e.key === 'ArrowRight') { e.shiftKey ? player.next() : player.seek(player.pos() + 5); } else if (e.key === 'ArrowLeft') { e.shiftKey ? player.prev() : player.seek(player.pos() - 5); }
   else if (e.key === 'ArrowUp') { vol.value = Math.min(1, +vol.value + 0.05); vol.oninput(); } else if (e.key === 'ArrowDown') { vol.value = Math.max(0, +vol.value - 0.05); vol.oninput(); }
-  else if (e.key === 'f' && view === 'now') viz.fullscreen(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
+  else if (e.key === 'f' && vizShown()) $('#fsBtn').click(); else if (e.key === 'n') { e.preventDefault(); $('#markHere').click(); }
 });
 
 // ------------------------------------------------------------------ extensions (optional add-ons; none ship enabled)
+// A view an extension adds: a button under "Extensions" in the left pane and a page in the main area. Removed with the extension.
+const extViews = new Map();
+function addExtView(extId, { id = extId, title, mount }) {
+  const v = 'ext-' + id.replace(/[^\w-]/g, ''), btn = h('button', { class: 'nav', 'data-view': v }, title || id), sec = h('section', { id: 'view-' + v, class: 'view', hidden: true });
+  navClick(btn); $('#extNav').append(btn); $('#extNav').hidden = false; $('#extViews').append(sec);
+  let un = null; try { un = mount?.(sec) || null; } catch (e) { sec.append(h('div', { class: 'err' }, String(e.message || e))); }
+  const rec = { extId, shown: () => {}, remove: () => { try { typeof un === 'function' ? un() : un?.stop?.(); } catch { /* going away */ } btn.remove(); sec.remove(); extViews.delete(v); $('#extNav').hidden = !extViews.size; if (view === v) show('now'); } };
+  extViews.set(v, rec); return rec.remove;
+}
+
 const extApi = id => ({
   id, player, library: lib, toast,
   viz: { get pack() { return viz.pack; }, get packs() { return viz.packs; }, setPack: pid => viz.setPack(pid), onFrame: cb => viz.onFrame(cb) },
   settings: { get: (k, d) => store.get(`ext.${id}.${k}`, d), set: (k, v) => store.set(`ext.${id}.${k}`, v) },
+  ui: { addView: v => addExtView(id, v) },
+  audio: { get context() { return feed.ctx; }, insert: (node, out) => player.insert(node, out) },
 });
 const extensions = new Extensions({ store, api: extApi });
-extensions.addEventListener('change', () => { if (view === 'settings') paintSettings(); });
+extensions.addEventListener('change', () => { for (const r of [...extViews.values()]) if (!extensions.running.has(r.extId)) r.remove(); if (view === 'settings') paintSettings(); });
 function extensionRows() {
   if (!extensions.list.length) return [h('div', { class: 'muted small' }, 'No extensions installed.')];
   return extensions.list.flatMap(e => {
@@ -364,6 +408,24 @@ function connectForm(L) {
   wrap.append(h('div', { class: 'lib-head' }, sel), fields, err, h('div', { class: 'cbtns' }, go, h('button', { class: 'btn', onclick: () => { formOpen.delete(L.id); paintSettings(); } }, 'Cancel')));
   return wrap;
 }
+// Settings → Tag edits → files
+function tagFileSettings(row, chk, num) {
+  const out = [h('h3', {}, 'Tag edits → files'),
+    row('Write tag edits to files', 'Off by default. Tag edits you make in bootleg are shown in bootleg only; turn this on to write them into the files — your own folders, and a server’s music through the folder it is shared from (an SMB share…). You review every edit before it is written.', h('input', { type: 'checkbox', id: 'set-tagWrite', checked: !!settings.tagWrite, onchange: async e => { settings.tagWrite = e.target.checked; applySettings(); if (settings.tagWrite) await tagFiles.allowFolders(); paintSettings(); } }))];
+  if (!settings.tagWrite) return out;
+  for (const { conn } of libs.allConnections()) {
+    const f = tagFiles.folders()[conn.id], c = tagChecks[conn.id];
+    const msg = !f ? 'Not set: this server’s edits stay in bootleg.' : !c ? f.root : !c.reachable ? `${f.root} — not reachable now (is the share mounted? on your home network or VPN?)` : !c.sample ? `${f.root} — the server reports no file paths, so files are matched by exact size. On Navidrome, turn on Report Real Path (see below).` : `${f.root}${c.prefix ? ' (server folder: ' + c.prefix + ')' : ''} — ${c.matched} of ${c.sample} sample tracks found`;
+    out.push(row(`Music folder for ${conn.title}`, msg, h('span', { class: 'sbtns' },
+      h('button', { class: 'btn', onclick: async () => { const dir = await TAURI.dialog.open({ directory: true, title: `Where is ${conn.title}’s music on this computer?` }); if (!dir) return; tagChecks[conn.id] = await tagFiles.setFolder(conn.id, dir); paintSettings(); } }, f ? 'Change…' : 'Choose…'),
+      f ? h('button', { class: 'btn', onclick: async () => { tagChecks[conn.id] = await tagFiles.detect(conn.id); paintSettings(); } }, 'Check') : '')));
+  }
+  if (libs.allConnections().length) out.push(h('div', { class: 'muted small' }, 'Navidrome: turn on “Report Real Path” for the bootleg player (Navidrome → Settings → Players → bootleg) so bootleg knows where each file is; without it files are matched by exact size, and ambiguous ones are left alone. Other servers: see the README.'));
+  const last = tagFiles.lastRun();
+  out.push(row('Write approved edits automatically', 'Every N hours, when the folders are reachable. 0 = only when you press Write. Only edits you approved in the review are written.', num('tagWriteHours', 0, 168)),
+    row('Review and write', last ? `Last run ${new Date(last.at).toLocaleString()}: ${last.ok} written, ${last.failed} not written${last.lines.length ? ' — ' + last.lines.slice(0, 3).join('; ') : ''}` : 'Not run yet.', h('button', { class: 'btn primary', id: 'tagReview', onclick: () => openTagReview(tagFiles, { h, toast, onDone: () => { if (view === 'settings') paintSettings(); } }) }, `Review edits… (${lib.tracks.filter(t => t.edited).length})`)));
+  return out;
+}
 let build = null; fetch('/build.json').then(r => r.json()).then(j => { build = j; }).catch(() => {});
 async function paintSettings() {
   const box = $('#settingsBody'), st = await cache.stats(), row = (label, hint, input) => h('label', { class: 'srow' }, h('span', {}, h('b', {}, label), hint ? h('small', {}, hint) : ''), input);
@@ -376,7 +438,7 @@ async function paintSettings() {
       h('button', { class: 'btn', onclick: async () => { libs.setActive(L.id); lib.scope = L.id; paintLibSel(); TAURI ? await addFolderDesktop().catch(e => toast(String(e), true)) : $('#folderIn').click(); paintSettings(); } }, 'Add folder here'),
       h('button', { class: 'btn', disabled: libs.list.length < 2, title: libs.list.length < 2 ? 'Keep at least one library' : 'Remove this library (your files are untouched; notes are kept)', onclick: async () => { await forgetLibrary(L); libs.remove(L.id); lib.scope = libs.active; renderAll(); paintLibSel(); paintSettings(); } }, 'Delete')),
     h('div', { class: 'muted small' }, MODES[L.mode].label === 'Studio' ? 'Studio: status, ideas, to-dos, mix notes and versions; how-it-was-made provenance.' : 'Listening: ratings, memories, stories; where-the-recording-came-from provenance.'),
-    L.connections.length ? h('div', { class: 'lib-roots' }, ...L.connections.map(c => h('span', {}, '☁ ', h('b', {}, c.title), ' ', h('span', { class: 'muted' }, getSource(c.plugin)?.name || c.plugin), ' ', h('button', { class: 'link', onclick: () => syncAll().then(paintSettings) }, 'sync'), ' ', h('button', { class: 'link', onclick: async () => { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); lib.removeMissing(`${c.plugin}:${c.id}`, new Set(), L.id); renderAll(); paintSettings(); } }, 'disconnect')))) : '',
+    L.connections.length ? h('div', { class: 'lib-roots' }, ...L.connections.map(c => h('span', {}, '☁ ', h('b', {}, c.title), ' ', h('span', { class: 'muted' }, getSource(c.plugin)?.name || c.plugin), ' ', h('button', { class: 'link', onclick: () => syncAll().then(paintSettings) }, 'sync'), ' ', h('button', { class: 'link', onclick: async () => { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); lib.removeMissing(`${c.plugin}:${c.id}`, new Set(), L.id); renderAll(); paintSettings(); } }, 'disconnect')))) : '',
     connectForm(L),
     L.roots.length ? h('div', { class: 'lib-roots' }, ...L.roots.map(r => h('span', {}, h('code', {}, r), ' ', h('button', { class: 'link', onclick: async () => { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); lib.removeMissing(r, new Set(), L.id); renderAll(); paintSettings(); } }, 'remove')))) : h('div', { class: 'muted small' }, TAURI ? 'No folders yet.' : 'In the browser, files you add stay for this session (the desktop app remembers folders).')));
   const newName = h('input', { placeholder: 'New library name…', id: 'newLibName' }), newMode = h('select', { id: 'newLibMode' }, ...Object.entries(MODES).map(([k, m]) => h('option', { value: k }, m.label)));
@@ -387,7 +449,11 @@ async function paintSettings() {
     h('h3', {}, 'Playing'),
     row('Clicking an album', 'In every album view. A double-click always plays the album and shows its tracks.', pick('albumClick', ALBUM_CLICKS, () => { gridKey = null; })),
     row('Play and double-click', 'Replace: the album, playlist or list you play becomes the queue. Build a queue: the queue is only ever added to — double-click adds to the end (playing at once if nothing is), ▶ plays straight away and keeps the rest. The “next” and “+ queue” buttons work the same in both.', pick('playModel', PLAY_MODELS)),
+    h('h3', {}, 'Now playing'),
+    row('Spectrogram on the timeline', 'The whole song’s spectrogram is drawn once per recording and remembered. For server tracks this downloads the file once more.', pick('spectro', { all: 'Local files and server tracks', local: 'Local files only', off: 'Off' }, () => nowView.refresh())),
+    row('Mini visualizer while browsing', 'Keeps the visualizer in the corner on the other pages (the ▭ button on the visualizer does the same).', h('input', { type: 'checkbox', id: 'set-vizFloat', checked: !!settings.vizFloat, onchange: e => { settings.vizFloat = e.target.checked; applySettings(); placeViz(); } })),
     TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
+    ...(tagFiles ? tagFileSettings(row, chk, num) : []),
     h('h3', {}, 'Library scanning'),
     row('Remember the library (cache)', 'Tags, covers and the file list are kept on this device, so the library appears instantly next time. Takes effect after a restart.', chk('cacheEnabled')),
     row('Check for changes on startup', TAURI ? 'Looks for added, changed and removed files in the background.' : 'Desktop app only — a browser cannot see the disk without being given files.', chk('scanOnStart')),
@@ -459,6 +525,27 @@ async function saveText(name, text, mime, fullPath) {
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
 const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: ts => acts.now(ts) });
+let nowKV; try { nowKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV(); } catch { nowKV = new MapKV(); }
+const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fmt, $, editTags, heat: new ListenHeat(nowKV), spectros: new SpectroCache(nowKV), isShown: () => view === 'now',
+  connTitle: id => libs.allConnections().find(c => c.conn.id === id)?.conn.title || '', spectroMode: () => settings.spectro,
+  search: q => { $('#search').value = q; show('tracks'); $('#search').oninput(); }, openQueue: () => { if ($('#queue').hidden) $('#qToggle').click(); } });
+// a server's ratings, stars and playlists ↔ bootleg (Subsonic/Navidrome); pushes go out as you rate
+// tag edits → the library (on start, on every change, and after a notes import)
+notes.store.allEdits().then(m => lib.setEdits(m)).catch(() => {});
+notes.store.addEventListener('change', async e => { const k = e.detail; if (k === '*') lib.setEdits(await notes.store.allEdits()); else if (typeof k === 'string' && k.startsWith('file:')) lib.setEdit(k, (await notes.store.get(k)).edits); });
+// tag edits → the files themselves (desktop, off by default: Settings → Tag edits → files)
+const makeTagFiles = () => new TagFiles({ lib, store: notes.store, kv: store, keyOf: trackKey, getPlugin: getSource, sessionOf, makeSource: tauriSource,
+  fs: { stat: p => TAURI.fs.stat(p), readDir: p => TAURI.fs.readDir(p), scan: root => scanFolderTauri(root), allow: path => TAURI.core.invoke('allow_path', { path }), write: (path, fields) => TAURI.core.invoke('write_tags', { path, fields }) },
+  patchIndex: async (path, size, mtime) => { for (const ix of await cache.indexes()) if (path.startsWith(ix.root + '/')) { const e = ix.entries.find(x => x.path === path); if (e) { Object.assign(e, { size, mtime }); await cache.putIndex(ix.root, ix.entries); } } } });
+const tagFiles = TAURI && !SELF ? makeTagFiles() : null;
+const tagChecks = {};      // connection → the last folder check, shown in Settings
+// The schedule writes only approved edits, only when it is due, and only what can be reached (a share off the home network is skipped, not failed).
+setInterval(async () => {
+  if (!tagFiles || !settings.tagWrite || !(settings.tagWriteHours > 0) || tagFiles.running || Date.now() - (tagFiles.lastRun()?.at || 0) < settings.tagWriteHours * 3600000) return;
+  const due = (await tagFiles.pending()).filter(e => e.approved && !e.written); if (!due.length) return;
+  const res = await tagFiles.apply(due).catch(() => []), ok = res.filter(r => r.ok && !r.skipped).length; if (ok) toast(`Wrote tag edits into ${plural(ok, 'file')}`); if (view === 'settings') paintSettings();
+}, 10 * 60000);
+const remoteAnn = new RemoteAnnotations({ notes: notes.store, kv: store, getPlugin: getSource, sessionOf, onError: m => toast('Server: ' + m, true) });
 
 // ------------------------------------------------------------------ desktop self-test (BOOTLEG_SELFTEST=<music dir> BOOTLEG_SELFTEST_OUT=<file>): proves the packaged app can scan, tag, stream and analyse real files
 async function selfTest(dir) {
@@ -486,6 +573,11 @@ async function selfTest(dir) {
       out.dlnaStatus = (await getOutput('dlna').status(dev)).state; await outputs.select(null); out.dlnaLocalRestored = player.localOut !== false;
     }
     { const mons = await TAURI.core.invoke('screens_list'); out.screens = mons.length; await TAURI.core.invoke('screen_open', { index: 0 }); await wait(() => viz.screenAlive, 12000); out.screenOpened = true; await TAURI.core.invoke('screen_close'); }   // a second window on a display, talking to the player
+    { // writing a tag edit into a real file (a temp fixture): store → library → native writer → re-read; last, so earlier checks see the original title
+      const lt = lib.tracks.find(x => x.src.kind === 'tauri'), tf = makeTagFiles(), k0 = trackKey(lt); await notes.store.setEdits(k0, { title: 'Self Test Edited', year: 1999 }); await wait(() => lt.title === 'Self Test Edited');
+      const res = await tf.apply(await tf.pending()); await wait(() => lt.tagged && !lt.edited && lt.title === 'Self Test Edited', 15000).catch(() => {});
+      const back = await lib.nativeReader(lt.src.path); out.tagWrite = res.length === 1 && res[0].ok && back?.title === 'Self Test Edited' && String(back?.year) === '1999' && trackKey(lt) !== k0; if (!out.tagWrite) out.tagWriteDiag = JSON.stringify({ res: res.map(r => r.error || r.path), back: back && { title: back.title, year: back.year } });
+    }
     await notes.store.setRating('selftest', 4); out.notesDb = (await notes.store.get('selftest')).rating === 4; await notes.store.setRating('selftest', 0);
     out.ok = true;
   } catch (e) { out.error = String(e && e.message || e); const a = player.audio; out.diag = { err: a.error && (a.error.code + ' ' + a.error.message), ready: a.readyState, net: a.networkState, paused: a.paused, ctx: feed.ctx && feed.ctx.state, src: (a.currentSrc || '').slice(0, 60), canFlac: a.canPlayType('audio/flac'), canMp3: a.canPlayType('audio/mpeg'), canM4a: a.canPlayType('audio/mp4') }; }
@@ -499,8 +591,10 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   $('#sys').replaceChildren(TAURI ? h('span', {}, 'desktop') : h('span', {}, 'web'));
   applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
   await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {}), window.__BOOTLEG_SELFTEST ? null : extensions.init()]);
+  await migrateRemoteKeys(notes.store).catch(e => console.warn('key migration', e));
+  if (tagFiles && settings.tagWrite) await tagFiles.allowFolders();      // the share folders chosen for writing are opened again      // before any server sync reads ratings
   const selfDir = TAURI ? await TAURI.core.invoke('selftest_config') : null; if (selfDir) selfTest(selfDir);
   else if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
   else (async () => { await restoreFromCache(); if (settings.scanOnStart) await syncAll(true); else if (!lib.tracks.length && !lib.renders.length) await syncAll(true); })();   // in the background: the window is usable right away
-  window.__bootleg = { extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

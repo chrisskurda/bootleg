@@ -17,9 +17,14 @@ extensions/<id>/
 | `api.viz` | `{ pack, packs, setPack(id), onFrame(cb) → unsubscribe }` — `onFrame` delivers every analysed audio frame (`A`: spectrum, level, beat, stems…) and keeps the analyser running while subscribed |
 | `api.library` | the library (read it; `tracks`, `renders`, `albums()`, `search()`) |
 | `api.settings` | `{ get(key, default), set(key, value) }`, stored per extension |
+| `api.ui.addView({ title, mount(el) → cleanup? })` | adds a page: a button under *Extensions* in the left pane, and `el` (an empty page) for you to fill. Returns a function that removes it; it is also removed when the extension stops |
+| `api.audio` | `{ context, insert(input, output = input) → remove }` — puts your nodes between the player and the speakers (in order of insertion). The visualizer and meters listen before them, so they see the music as it is |
 | `api.toast(msg, bad?)` | show a message |
 | `api.id` | this extension's id |
 Return `stop()` to release everything (listeners, timers, sockets, `onFrame` subscriptions): it runs when the user turns the extension off or changes one of its settings (the extension restarts with the new value). `status()` is a short string shown under the extension in Settings.
+
+## Included: Equalizer (`extensions/equalizer`)
+Ten filters (shelves at 31 Hz and 16 kHz, peaking bands between) and a preamp, inserted with `api.audio.insert`, on a page added with `api.ui.addView`. Presets: Flat, Bass boost, Treble boost, Vocal, Loudness, Night. The curve is kept in the extension's settings.
 
 ## Included: Car Thing bridge (`extensions/bridge-thing`)
 Connects out to the **bootleg-bridge-thing** desktop app (`ws://127.0.0.1:8899/bootleg`) so a Spotify Car Thing can control playback and show the visualizer: publishes state and cover art, executes the commands the device relays back, and streams spectrum frames while the device is watching. Protocol and tests are in that folder (`node extensions/bridge-thing/bridge.test.mjs`). It is a candidate to live in the bridge repo and be vendored here, the way the visualizer is.

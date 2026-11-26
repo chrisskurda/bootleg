@@ -33,12 +33,14 @@ await pg.click('.nav[data-view="albums"]'); await pg.click('#albumMode button[da
 await pg.click('#albumMode button[data-mode="flow"]'); await pg.waitForSelector('#albumFlow .fitem.center'); await pg.locator('#albumFlow .flow').focus(); for (let i = 0; i < 4; i++) { await pg.keyboard.press('ArrowRight'); await sleep(120); } await sleep(900); await shot('albums-flow');
 await pg.click('#albumMode button[data-mode="split"]'); await pg.waitForSelector('#splitList .srow2'); await pg.locator('#splitList .srow2', { hasText: 'Funk Report' }).click(); await pg.waitForFunction(() => document.querySelector('#splitPane .big')?.textContent === 'Funk Report'); await sleep(900); await shot('albums-split');
 await pg.click('#albumMode button[data-mode="grid"]');
-// 3. now playing: a visualizer reacting to the music
-await play('Night Garden'); await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'horizon'); await sleep(4200); await shot('now-playing');
-// 4. notes on the timeline + provenance, right under the visualizer (a taller window so both fit)
-await tall(1200); await ev(() => { const l = document.querySelector('#lookParams'); l.style.display = 'none'; l.previousElementSibling.style.display = 'none'; document.querySelector('#view-now').scrollTop = 0; }); await sleep(600); await shot('notes'); await normal();
+// 3. the visualizer page (every setting out in the open), then Now playing: the track, its timeline and the visualizer tile
+await play('Night Garden'); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'horizon'); await sleep(3500); await shot('visualizer');
+await pg.click('.nav[data-view="now"]'); await pg.waitForSelector('#tlSpec.on', { timeout: 30000 }); await sleep(4000); await shot('now-playing');
+// 4. the timeline with its note callouts, and the notes editor under it (a taller window so both fit)
+await tall(1200); await ev(() => { const v = document.querySelector('#view-now'); v.scrollTop = document.getElementById('timeline').offsetTop - 20; }); await sleep(600); await shot('notes'); await normal();
 // 5. a stem set: mix-first, stems loaded for a stem-aware visualizer, with the live mixer
-await tall(1100); await ev(() => { document.querySelector('#view-now').scrollTop = 0; document.getElementById('notesPanel').style.display = 'none'; }); await pg.evaluate(async () => { const B = window.__bootleg; await B.player.playList([B.lib.renders[0]], 0); }); await pg.selectOption('#packSelect', 'stem-rack');
-await pg.waitForFunction(() => window.__bootleg.player.stemsState === 'ready', null, { timeout: 30000 }); await sleep(2500); await ev(() => { const s = document.querySelectorAll('#stemRows .stem'); if (s[3]) s[3].querySelector('.ms.m')?.click(); });
+await tall(1100); await pg.evaluate(async () => { const B = window.__bootleg; await B.player.playList([B.lib.renders[0]], 0); }); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'stem-rack'); await pg.click('.nav[data-view="now"]');
+await ev(() => { document.getElementById('notesPanel').style.display = 'none'; });
+await pg.waitForFunction(() => window.__bootleg.player.stemsState === 'ready', null, { timeout: 30000 }); await sleep(2500); await ev(() => { const s = document.querySelectorAll('#stemRows .stem'); if (s[3]) s[3].querySelector('.ms.m')?.click(); document.querySelector('#view-now').scrollTop = 0; });
 await sleep(900); await shot('stems');
 await browser.close(); srv.kill();

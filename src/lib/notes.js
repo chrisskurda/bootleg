@@ -16,7 +16,15 @@ export class IdbBackend {
   async all() { const s = await this._s('readonly'), keys = await this._r(s.getAllKeys()), vals = await this._r(s.getAll()); return keys.map((key, i) => ({ key, value: vals[i] })); }
 }
 
-const blank = key => ({ key, rating: 0, status: '', tags: [], notes: [], provenance: null, fingerprint: null, updated: 0 });
+// Two records of one recording become one: the newer side's value wins where it has one; tags, notes and tag edits are unioned.
+const has = v => !(v == null || v === '' || v === 0 || (Array.isArray(v) && !v.length));
+function mergeRecs(a, b) {
+  const [old, nu] = (a.updated || 0) > (b.updated || 0) ? [b, a] : [a, b], out = { ...old };
+  for (const [k, v] of Object.entries(nu)) if (has(v)) out[k] = v;
+  const ids = new Set(nu.notes.map(x => x.id)); out.notes = [...nu.notes, ...old.notes.filter(x => !ids.has(x.id))];
+  out.tags = [...new Set([...(old.tags || []), ...(nu.tags || [])])]; out.edits = old.edits || nu.edits ? { ...(old.edits || {}), ...(nu.edits || {}) } : null; return out;
+}
+const blank = key => ({ key, rating: 0, status: '', tags: [], notes: [], provenance: null, fingerprint: null, edits: null, updated: 0 });
 export class NotesStore extends EventTarget {
   constructor(backend = new MemoryBackend()) { super(); this.b = backend; }
   async get(key) { return (await this.b.get('t:' + key)) || blank(key); }
@@ -29,6 +37,12 @@ export class NotesStore extends EventTarget {
   async _setProv(key, p) { const r = await this.get(key); r.provenance = p && { kind: PROVENANCE_KINDS.includes(p.kind) ? p.kind : 'other', date: p.date || '', device: p.device || '', venue: p.venue || '', source: p.source || '', note: p.note || '' }; return this._save(r); }
   async patchProvenance(key, patch) { const r = await this.get(key); return this._setProv(key, { ...(r.provenance || { kind: 'other' }), ...patch }); }
   setProvenance(key, p) { return this._setProv(key, p); }   // merges against what is stored, not a stale view
+  // Tag edits shown in bootleg instead of the file's/server's tags ({ title, artist, … }). A field set to null drops that edit.
+  async setEdits(key, patch) { const r = await this.get(key), e = { ...(r.edits || {}) }; for (const [k, v] of Object.entries(patch)) { if (v == null) delete e[k]; else e[k] = v; } r.edits = Object.keys(e).length ? e : null; r.editState = null; return this._save(r); }      // a changed edit needs approving again
+  // Where an edit stands on the way to the file: approved (the scheduled writer may write it), written (in the file; for a server
+  // track, waiting for the server to re-read it). Dropping all edits drops this too.
+  async setEditState(key, patch) { const r = await this.get(key); r.editState = r.edits ? { ...(r.editState || {}), ...patch } : null; return this._save(r); }
+  async allEdits() { return new Map((await this.b.all()).filter(x => x.key.startsWith('t:') && x.value.edits).map(x => [x.value.key, x.value.edits])); }
   async setFingerprint(key, fp) { const r = await this.get(key); r.fingerprint = fp; return this._save(r); }
   // A note with `at` (seconds) lives on the timeline; with `to` it covers a range; without either it is a note on the whole recording.
   async addNote(key, { text, at = null, to = null, kind = 'note' }) { const r = await this.get(key), n = { id: uid(), text, at, to, kind, created: Date.now() }; r.notes.push(n); await this._save(r); return n; }
@@ -38,7 +52,7 @@ export class NotesStore extends EventTarget {
   async allTags() { const c = new Map(); for (const { key, value } of await this.b.all()) if (key.startsWith('t:')) for (const g of value.tags || []) c.set(g, (c.get(g) || 0) + 1); return [...c].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); }
   async find({ minRating = 0, tag, text, status } = {}) { const q = text?.toLowerCase(); return (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating >= minRating && (!tag || r.tags.includes(tag)) && (!status || r.status === status) && (!q || r.notes.some(n => n.text.toLowerCase().includes(q)) || (r.provenance && JSON.stringify(r.provenance).toLowerCase().includes(q)))); }
 
-  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
+  async export() { const recs = (await this.b.all()).filter(x => x.key.startsWith('t:')).map(x => x.value).filter(r => r.rating || r.status || r.tags.length || r.notes.length || r.provenance || r.edits); const pl = (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value); return { format: NOTES_FORMAT, version: NOTES_VERSION, exported: new Date().toISOString(), tracks: recs, playlists: pl }; }
   // Merge: newer record wins per track; notes are unioned by id so two devices don't lose each other's work.
   async import(doc) {
     if (!doc || doc.format !== NOTES_FORMAT) throw new Error('not a bootleg notes file'); if (doc.version > NOTES_VERSION) throw new Error('notes file is from a newer bootleg');
@@ -48,13 +62,29 @@ export class NotesStore extends EventTarget {
     this.dispatchEvent(new CustomEvent('change', { detail: '*' })); return { added, merged, playlists: (doc.playlists || []).length };
   }
 
+  // Moves records to new keys ({ old: new }): a file whose size changed (we wrote its tags), or a key format change. If both
+  // exist they merge like an import (newer fields win, notes are unioned). Playlist entries follow.
+  async rekey(moves) {
+    const pairs = Object.entries(moves).filter(([a, b]) => a !== b); if (!pairs.length) return 0; let n = 0;
+    await this._lock(async () => {
+      for (const [from, to] of pairs) {
+        const a = await this.b.get('t:' + from); if (!a) continue; const b = await this.b.get('t:' + to);
+        const merged = b ? mergeRecs(a, b) : a;
+        await this.b.put('t:' + to, { ...merged, key: to }); await this.b.del('t:' + from); n++;
+      }
+      const map = new Map(pairs);
+      for (const { key, value } of await this.b.all()) if (key.startsWith('p:') && value.items.some(k => map.has(k))) await this.b.put(key, { ...value, items: value.items.map(k => map.get(k) || k) });
+    });
+    if (n) this.dispatchEvent(new CustomEvent('change', { detail: '*' })); return n;
+  }
+
   // ---- playlists: entries are track keys + a human line so a list survives a missing library (resolved by key, then fingerprint, then "artist - title")
-  async savePlaylist({ id = uid(), name, items }) { const p = { id, name, items, updated: Date.now() }; await this.b.put('p:' + id, p); this.dispatchEvent(new CustomEvent('change', { detail: 'playlist' })); return p; }
+  async savePlaylist({ id = uid(), name, items, server }) { const p = { id, name, items, updated: Date.now(), ...(server ? { server } : {}) }; await this.b.put('p:' + id, p); this.dispatchEvent(new CustomEvent('change', { detail: 'playlist' })); return p; }
   async playlists() { return (await this.b.all()).filter(x => x.key.startsWith('p:')).map(x => x.value).sort((a, b) => a.name.localeCompare(b.name)); }
-  async deletePlaylist(id) { await this.b.del('p:' + id); }
+  async deletePlaylist(id) { await this.b.del('p:' + id); this.dispatchEvent(new CustomEvent('change', { detail: 'playlist' })); }
 }
 
-for (const n of ['setRating', 'setStatus', 'setTags', 'setProvenance', 'patchProvenance', 'setFingerprint', 'addNote', 'editNote', 'removeNote']) { const f = NotesStore.prototype[n]; NotesStore.prototype[n] = function (...a) { return this._lock(() => f.apply(this, a)); }; }
+for (const n of ['setEdits', 'setEditState', 'setRating', 'setStatus', 'setTags', 'setProvenance', 'patchProvenance', 'setFingerprint', 'addNote', 'editNote', 'removeNote']) { const f = NotesStore.prototype[n]; NotesStore.prototype[n] = function (...a) { return this._lock(() => f.apply(this, a)); }; }
 
 // ---- M3U / M3U8 (the interchange format every other player speaks)
 export function toM3U(name, tracks, { relativeTo = '' } = {}) {

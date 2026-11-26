@@ -89,7 +89,7 @@ try {
   await pg.click('#repeat'); await pg.click('#repeat'); t('repeat cycles off → all → one', (await pg.locator('#repeat').getAttribute('title')) === 'Repeat: one'); await pg.click('#repeat');
 
   // ---- visualizer follows the music
-  await pg.click('.nav[data-view="now"]'); await pg.waitForFunction(() => document.getElementById('frame') === null && document.querySelector('#vizStage iframe').contentWindow.__AUDIO); await sleep(800);
+  await pg.click('.nav[data-view="viz"]'); await pg.waitForFunction(() => document.getElementById('frame') === null && document.querySelector('#vizStage iframe').contentWindow.__AUDIO); await sleep(800);
   const a1 = await ev(() => { const A = document.querySelector('#vizStage iframe').contentWindow.__AUDIO; return { live: A.live, t: A.t, title: A.meta.title, peak: Math.max(...A.spectrum), cover: !!A.meta.cover }; });
   t('the visualizer gets the song: live, time, title, cover, and a real spectrum', a1.live && a1.t > 0 && a1.title === 'Second Quarter' && a1.peak > 0.2 && a1.cover, JSON.stringify(a1));
   await pg.selectOption('#packSelect', 'stem-rack'); await sleep(1500); t('pack picker switches the pack (its settings appear)', (await pg.locator('#packParams .ctl').count()) >= 3);
@@ -98,10 +98,10 @@ try {
   // ---- stem render
   await pg.click('.nav[data-view="renders"]'); await pg.locator('#renderList .rcard').click(); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3, null, { timeout: 30000 });
   t('a stem set starts playing from its MIX immediately (no stems decoded yet)', (await ev(() => [window.__bootleg.player.mode, window.__bootleg.player.stemsState, window.__bootleg.player.deck.stems.length].join())) === 'element,unloaded,0');
-  await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'weather-report'); await sleep(500); t('a pack that does not use stems does not trigger loading them', (await ev(() => window.__bootleg.player.stemsState)) === 'unloaded' && (await pg.locator('#loadStems').count()) === 1);
+  await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'weather-report'); await sleep(500); t('a pack that does not use stems does not trigger loading them', (await ev(() => window.__bootleg.player.stemsState)) === 'unloaded' && (await pg.locator('#loadStems').count()) === 1);
   const posBefore = await ev(() => window.__bootleg.player.pos()); await pg.selectOption('#packSelect', 'stem-rack'); await pg.waitForFunction(() => window.__bootleg.player.mode === 'deck' && window.__bootleg.player.deck.stems.length === 5 && window.__bootleg.player.playing, null, { timeout: 30000 });
   t('selecting a stem-aware visualizer loads the real stems, which take over at the same position', (await ev(() => window.__bootleg.player.deck.stems.map(s => s.name).sort().join())) === 'hats,keys,kick,snare,sub' && (await ev(() => window.__bootleg.player.pos())) >= posBefore - 0.2);
-  await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'stem-rack'); await pg.waitForSelector('#stemRows .stem'); await sleep(1200);
+  await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'stem-rack'); await pg.click('.nav[data-view="now"]'); await pg.waitForSelector('#stemRows .stem'); await sleep(1200);
   t('the mixer lists the stems with their roles', (await pg.locator('#stemRows .stem').count()) === 5 && (await pg.locator('#stemRows').innerText()).toLowerCase().includes('bass'));
   const s1 = await ev(() => { const A = document.querySelector('#vizStage iframe').contentWindow.__AUDIO; return { n: A.stems.length, est: A.stem('kick').estimated, hats: A.stem('hats').label, level: A.stem('kick').level }; });
   t('the pack receives real per-stem data and the sample text', s1.n === 5 && s1.est === false && /Hats/.test(s1.hats), JSON.stringify(s1));
@@ -120,14 +120,14 @@ try {
   const sp = await pg.context().newPage(); sp.on('pageerror', e => errs.push('screen: ' + e.message)); await sp.goto(`http://127.0.0.1:${PORT}/screen.html`); await sp.waitForFunction(() => document.getElementById('msg').hidden, null, { timeout: 15000 }); await sleep(800);
   const sa = await sp.evaluate(async () => { const w = document.getElementById('pack').contentWindow; let peak = 0; for (let i = 0; i < 25; i++) { peak = Math.max(peak, ...w.__AUDIO.spectrum); await new Promise(r => setTimeout(r, 60)); } const A = w.__AUDIO; return { src: document.getElementById('pack').src, live: A.live, stems: A.stems.length, kickLevel: typeof A.stem('kick').level, peak, past: A.past(0.5).length, title: w.__META.title }; });      // peak over 1.5 s: the fixture's hits are sparse
   t('a screen window shows the selected pack, fed with the player\'s live audio, stems and song info', /stem-rack/.test(sa.src) && sa.live && sa.stems === 5 && sa.kickLevel === 'number' && sa.peak > 0.2 && sa.past === 64 && !!sa.title, JSON.stringify(sa));
-  await pg.bringToFront(); await pg.selectOption('#packSelect', 'weather-report'); await sp.waitForFunction(() => /weather-report/.test(document.getElementById('pack').src), null, { timeout: 8000 }); t('changing the pack in the player changes it on the screen', true);
+  await pg.bringToFront(); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'weather-report'); await sp.waitForFunction(() => /weather-report/.test(document.getElementById('pack').src), null, { timeout: 8000 }); t('changing the pack in the player changes it on the screen', true);
   await pg.click('.nav[data-view="tracks"]'); const t1 = await sp.evaluate(() => document.getElementById('pack').contentWindow.__AUDIO.t); await sleep(900); const t2 = await sp.evaluate(() => document.getElementById('pack').contentWindow.__AUDIO.t); t('the screen keeps updating while the player shows another view', t2 > t1 + 0.4, `${t1.toFixed(2)} → ${t2.toFixed(2)}`);
-  await sp.close(); await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'stem-rack');
+  await sp.close(); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'stem-rack');
   // ---- stem sets in the library: one item, hidden parts, mix-first, stems on demand
   await pg.click('.nav[data-view="settings"]'); await pg.locator('#settingsBody .srow', { hasText: 'Show stem sets in the track list' }).locator('input').check(); await pg.click('.nav[data-view="tracks"]'); await pg.waitForFunction(() => document.querySelectorAll('#trackList .row .stemchip').length === 1);
   const listed = await pg.locator('#trackList .row .tt').allInnerTexts(); t('a stem set is listed once in the track list with a stems badge (its mix and stems are not separate rows)', listed.length === 4 && listed.filter(x => /stems/.test(x)).length === 1 && !listed.some(x => /^(mix|kick|snare|hats|keys|sub)$/i.test(x.trim())), listed.join(' | '));
   await pg.locator('#settingsBody').count(); await pg.click('.nav[data-view="settings"]'); await pg.locator('#settingsBody .srow', { hasText: 'Load stems' }).locator('select').selectOption('manual'); await pg.click('.nav[data-view="tracks"]');
-  await pg.locator('#trackList .row', { hasText: 'stems' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.item?.kind === 'render' && window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3); await pg.click('.nav[data-view="now"]'); await pg.selectOption('#packSelect', 'weather-report'); await pg.selectOption('#packSelect', 'stem-rack'); await sleep(600);
+  await pg.locator('#trackList .row', { hasText: 'stems' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.item?.kind === 'render' && window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.3); await pg.click('.nav[data-view="viz"]'); await pg.selectOption('#packSelect', 'weather-report'); await pg.selectOption('#packSelect', 'stem-rack'); await sleep(600); await pg.click('.nav[data-view="now"]');
   t('"Only when I press Load stems": a stem-aware pack does not load them, the mix keeps playing', (await ev(() => window.__bootleg.player.stemsState + ',' + window.__bootleg.player.mode)) === 'unloaded,element' && (await pg.locator('#loadStems').count()) === 1);
   const p0 = await ev(() => window.__bootleg.player.pos()); await pg.click('#loadStems'); await pg.waitForFunction(() => window.__bootleg.player.mode === 'deck' && window.__bootleg.player.stemsState === 'ready'); t('Load stems swaps to the stem engine at the same position', (await ev(() => window.__bootleg.player.pos())) >= p0 - 0.2 && (await pg.locator('#stemRows .stem').count()) === 5);
   const p1 = await ev(() => window.__bootleg.player.pos()); await pg.click('#unloadStems'); await pg.waitForFunction(() => window.__bootleg.player.mode === 'element' && window.__bootleg.player.stemsState === 'unloaded'); t('Unload frees the stems and goes back to the mix where it was', (await ev(() => window.__bootleg.player.pos())) >= p1 - 0.3 && (await ev(() => window.__bootleg.player.deck.stems.length)) === 0);
@@ -147,6 +147,26 @@ try {
   await pg.click('#notesPanel .prov summary'); await pg.selectOption('#notesPanel .prov select', 'vinyl-rip'); await pg.locator('#notesPanel .prov input[placeholder^="Technics"]').fill('Technics SL-1200'); await pg.locator('#notesPanel .prov input[placeholder^="Technics"]').blur(); await sleep(300);
   t('provenance saves (kind + device)', (await ev(() => window.__bootleg.notes.store.get(window.__bootleg.notes.store.b ? [...window.__bootleg.player.queue].length && null : null))) !== undefined);
   const recs = await ev(async () => (await window.__bootleg.notes.store.export()).tracks); t('the store holds rating, 2 notes and provenance', recs.length === 1 && recs[0].rating === 4 && recs[0].notes.length === 2 && recs[0].provenance?.kind === 'vinyl-rip' && /Technics/.test(recs[0].provenance.device), JSON.stringify(recs[0].provenance));
+  // ---- the Now playing page: the track, its timeline (spectrogram, note callouts, listening heatmap), up next, the visualizer tile
+  await pg.click('.nav[data-view="now"]'); await pg.waitForSelector('#tlSpec.on', { timeout: 30000 });
+  const nowTitle = await ev(() => window.__bootleg.player.item.title);
+  t('Now playing shows the track with its facts', (await pg.locator('#nowInfo .nowtitle').innerText()).includes(nowTitle) && (await pg.locator('#nowInfo .facts dt').count()) >= 2, nowTitle);
+  t('the song\'s spectrogram is drawn on the timeline', await ev(() => { const c = document.getElementById('tlSpec'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 120) lit++; return c.width === 800 && lit > 200; }));
+  t('a timed note is a callout on the timeline; whole-recording notes are not', (await pg.locator('#tlCallouts .tlcall').count()) === 1 && (await pg.locator('#tlCallouts .tlcall').innerText()).includes('crackle'));
+  await ev(() => { const p = window.__bootleg.player; p.pause(); p.seek(p.dur() * 0.9); }); await pg.locator('#tlCallouts .tlcall').click(); await sleep(200); t('clicking a callout jumps to its moment', Math.abs((await ev(() => window.__bootleg.player.pos())) - 2) < 0.6);
+  const box = await pg.locator('#tlPlot').boundingBox(); await pg.mouse.click(box.x + box.width / 2, box.y + box.height / 2); await sleep(200);
+  t('clicking the timeline seeks there', Math.abs((await ev(() => window.__bootleg.player.pos() / window.__bootleg.player.dur())) - 0.5) < 0.05);
+  t('up next is shown', (await pg.locator('#upNext').innerText()).includes('Up next'));
+  await ev(() => { document.getElementById('view-now').scrollTop = 0; }); await sleep(100);
+  const tile = await ev(() => { const a = document.getElementById('vizStage').getBoundingClientRect(), b = document.getElementById('nowVizSlot').getBoundingClientRect(); return !document.getElementById('vizStage').hidden && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2; });
+  t('the visualizer is a tile on Now playing', tile);
+  await pg.locator('#vizStage').hover(); await pg.click('#vizGear'); t('its ⚙ slides in the visualizer settings', await pg.locator('#vizDrawer #packSelect').isVisible()); await pg.click('#drawerClose');
+  await pg.click('.nav[data-view="viz"]'); t('the Visualizer page has every setting out in the open', (await pg.locator('#vizSideHome #packSelect').isVisible()) && (await pg.locator('#vizSideHome #lookParams .ctl').count()) > 5);
+  const src0 = await ev(() => document.querySelector('#vizStage iframe').src); await pg.click('.nav[data-view="now"]'); t('moving between the tile and the page does not reload the pack', (await ev(() => document.querySelector('#vizStage iframe').src)) === src0 && (await ev(() => !!document.querySelector('#vizStage iframe').contentWindow.__AUDIO)));
+  await pg.locator('#vizStage').hover(); await pg.click('#vizFloat'); await pg.click('.nav[data-view="tracks"]'); await sleep(200);
+  t('the mini player floats over other pages when pinned', await ev(() => { const s = document.getElementById('vizStage'); return !s.hidden && s.dataset.mode === 'float'; }) && (await ev(() => window.__bootleg.viz.running)));
+  await pg.locator('#vizStage').hover(); await pg.click('#vizFloat'); await sleep(100); t('…and goes away when unpinned', await ev(() => document.getElementById('vizStage').hidden));
+  await pg.click('.nav[data-view="now"]'); await ev(() => window.__bootleg.player.play());
   if (shots) await pg.screenshot({ path: path.join(shots, 'notes.png') });
   await pg.click('.nav[data-view="notes"]'); await pg.waitForSelector('#noteCards .ncard'); t('the Notes view lists the annotated recording; search finds it by provenance', (await pg.locator('#noteCards .ncard').count()) === 1); await pg.fill('#noteSearch', 'technics'); await sleep(300); t('…found by device text', (await pg.locator('#noteCards .ncard').count()) === 1); await pg.fill('#noteSearch', 'nonexistent'); await sleep(300); t('…and filtered out when it does not match', (await pg.locator('#noteCards .ncard').count()) === 0); await pg.fill('#noteSearch', '');
   const [dl] = await Promise.all([pg.waitForEvent('download'), pg.click('#notesExport')]); const exported = JSON.parse(fs.readFileSync(await dl.path(), 'utf8')); t('export notes downloads a bootleg-notes file', exported.format === 'bootleg-notes' && exported.tracks.length === 1, dl.suggestedFilename());
@@ -200,6 +220,15 @@ try {
   wsConn.send(JSON.stringify({ cmd: 'volume', to: 0.33 })); await pg.waitForFunction(() => Math.abs(window.__bootleg.player.volume - 0.33) < 0.001); t('commands from the device drive the player', true);
   wsConn.send(JSON.stringify({ cmd: 'frames', on: true })); await sleep(900); t('the device can subscribe to spectrum frames (the extension taps the visualizer through the API)', got.some(m => m.type === 'frame' && typeof m.s === 'string' && atob(m.s).length === 64 && Array.isArray(m.f)) && (await ev(() => window.__bootleg.viz.taps.size)) === 1);
   await pg.locator('#settingsBody .srow', { hasText: 'Car Thing bridge' }).locator('input').uncheck(); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('bridge-thing')); t('turning it off detaches it completely (no leftover frame tap)', (await ev(() => window.__bootleg.viz.taps.size)) === 0);
+  // ---- extensions can add a page to the left pane and process the audio: the bundled equalizer
+  const eqRow = () => pg.locator('#settingsBody .srow', { hasText: 'Equalizer' }).first();
+  await eqRow().locator('input').check(); await pg.waitForSelector('#extNav .nav:has-text("Equalizer")', { timeout: 8000 });
+  t('an extension adds its page under Extensions in the left pane', await pg.locator('#extNav').isVisible());
+  await pg.click('#extNav .nav:has-text("Equalizer")'); await pg.waitForSelector('[id^="view-ext-"] input[type=range]');
+  t('the equalizer page has ten bands and a preamp', (await pg.locator('[id^="view-ext-"]:not([hidden]) input[type=range]').count()) === 11);
+  t('…and sits between the player and the speakers', (await ev(() => window.__bootleg.player.inserts.length)) === 1);
+  await pg.click('.nav[data-view="settings"]'); await eqRow().locator('input').uncheck(); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('equalizer'));
+  t('turning it off removes its page and its processing', (await pg.locator('#extNav .nav').count()) === 0 && (await pg.locator('#extNav').isHidden()) && (await ev(() => window.__bootleg.player.inserts.length)) === 0);
   await ev(() => window.__bootleg.player.setVolume(0.9));
 
   // ---- progress while importing a big folder
@@ -232,13 +261,44 @@ try {
   // ---- Subsonic source plugin (against a mock server)
   const sdir = path.join(tmp, 'srv'); fs.mkdirSync(sdir); const files = {}; for (const [id, f] of [['s1', 330], ['s2', 440], ['s3', 550], ['s4', 660]]) { files[id] = path.join(sdir, id + '.flac'); ff('-f', 'lavfi', '-i', `sine=frequency=${f}:duration=5`, '-c:a', 'flac', files[id]); }
   const song = (id, title, album, albumId, track) => ({ id, title, artist: 'Server Band', album, albumId, track, suffix: 'flac', duration: 5, size: fs.statSync(files[id]).size, created: '2026-01-0' + track + 'T00:00:00Z', coverArt: albumId, genre: 'Funk', year: 2024 });
-  const mock = await startMock({ songs: [song('s1', 'Remote One', 'Cloud Album', 'al1', 1), song('s2', 'Remote Two', 'Cloud Album', 'al1', 2), song('s3', 'Solo Cloud', 'Other Album', 'al2', 1)], files, cover: path.join(tmp, 'a.png') });
+  const mock = await startMock({ songs: [song('s1', 'Remote One', 'Cloud Album', 'al1', 1), song('s2', 'Remote Two', 'Cloud Album', 'al1', 2), song('s3', 'Solo Cloud', 'Other Album', 'al2', 1)], files, cover: path.join(tmp, 'a.png'), playlists: [{ id: 'pl1', name: 'Server Mix', songs: ['s3', 's1', 'gone'] }] });
+  Object.assign(mock.state.songs.find(x => x.id === 's2'), { userRating: 5 }); Object.assign(mock.state.songs.find(x => x.id === 's3'), { starred: '2026-01-01T00:00:00Z' });
   await pg.click('.nav[data-view="settings"]'); await pg.fill('#newLibName', 'Server'); await pg.click('#newLibBtn'); const sid = await ev(() => window.__bootleg.libs.active); await pg.click('#connectOpen-' + sid);
   await pg.fill('input[name=url]', mock.url); await pg.fill('input[name=username]', 'alice'); await pg.fill('input[name=password]', 'wrong'); await pg.click('.connect .btn.primary'); await pg.waitForSelector('.connect .err:not(:empty)');
   t('a wrong password is reported with the server’s message and nothing is added', /Wrong username or password/.test(await pg.locator('.connect .err').innerText()) && (await ev(() => window.__bootleg.libs.allConnections().length)) === 0);
   await pg.fill('input[name=password]', 'secret'); await pg.click('.connect .btn.primary'); await pg.waitForFunction(() => window.__bootleg.lib.visibleTracks.length === 3, null, { timeout: 20000 });
   const rt = await ev(() => window.__bootleg.lib.visibleTracks.map(x => [x.title, x.artist, x.album, x.src.kind, !!x.coverUrl, x.genre, x.year, x.duration].join('|')).sort());
   t('connecting lists the server\'s tracks with tags, cover art and duration — nothing read from files', rt.length === 3 && rt[0] === 'Remote One|Server Band|Cloud Album|remote|true|Funk|2024|5', rt[0]);
+  // ---- server ratings, stars and playlists (Navidrome keeps these; bootleg syncs them both ways)
+  const skey = title => pg.evaluate(tt => { const x = window.__bootleg.lib.tracks.find(y => y.title === tt); return 'file:' + x.src.path + '#' /* a server track's key has no size */; }, title), rec = k => pg.evaluate(async kk => window.__bootleg.notes.store.get(kk), k);
+  await pg.waitForFunction(async () => (await window.__bootleg.notes.store.playlists()).some(p => p.server), null, { timeout: 10000 });
+  const spl = await ev(async () => (await window.__bootleg.notes.store.playlists()).find(p => p.server));
+  t('the server\'s playlists appear in Playlists, in order, with tracks the library knows', spl.name === 'Server Mix' && spl.items.length === 2 && spl.items[0] === await skey('Solo Cloud'), JSON.stringify(spl.items));
+  t('server ratings and stars arrive: 5 stars, and the "starred" tag', (await rec(await skey('Remote Two'))).rating === 5 && (await rec(await skey('Solo Cloud'))).tags.includes('starred'));
+  await pg.evaluate(async k => window.__bootleg.notes.store.setRating(k, 3.5), await skey('Remote One')); await pg.evaluate(async k => window.__bootleg.notes.store.setTags(k, ['starred']), await skey('Remote One'));
+  for (let i = 0; i < 50 && mock.state.writes.length < 2; i++) await sleep(100);
+  t('rating or starring in bootleg is sent to the server (half stars round to whole)', JSON.stringify(mock.state.writes) === JSON.stringify([['setRating', 's1', '4'], ['star', 's1', null]]), JSON.stringify(mock.state.writes));
+  mock.state.songs.find(x => x.id === 's1').userRating = 2; await ev(() => window.__bootleg.syncAll()); await sleep(300);
+  t('a rating changed on the server since the last sync wins in bootleg', (await rec(await skey('Remote One'))).rating === 2 && mock.state.writes.length === 2);
+  await pg.evaluate(async k => window.__bootleg.notes.store.setRating(k, 0), await skey('Remote One')); for (let i = 0; i < 50 && mock.state.writes.length < 3; i++) await sleep(100);
+  t('clearing a rating clears it on the server', !('userRating' in mock.state.songs.find(x => x.id === 's1')));
+  await pg.click('.nav[data-view="playlists"]'); await pg.waitForSelector('#plList .ncard:has-text("Server Mix")'); t('a server playlist is marked ☁ and cannot be deleted here', (await pg.locator('#plList .ncard:has-text("Server Mix")').innerText()).includes('☁') && (await pg.locator('#plList .ncard:has-text("Server Mix") button:has-text("delete")').count()) === 0);
+  // ---- tag edits in bootleg override what the server says (in bootleg only)
+  await pg.click('.nav[data-view="tracks"]'); const solo = pg.locator('#trackList .row', { hasText: 'Solo Cloud' }); await solo.hover(); await solo.locator('button:has-text("edit")').click();
+  await pg.waitForSelector('dialog.tagdlg[open]'); await pg.fill('dialog.tagdlg input[name=title]', 'Solo Cloud (Live)'); await pg.fill('dialog.tagdlg input[name=genre]', 'Live Funk'); const w0 = mock.state.writes.length; await pg.click('dialog.tagdlg button[type=submit]');
+  await pg.waitForFunction(() => window.__bootleg.lib.tracks.some(x => x.title === 'Solo Cloud (Live)' && x.genre === 'Live Funk'));
+  t('editing a server track\'s tags shows the edit everywhere in bootleg, marked ✎', (await pg.locator('#trackList .row', { hasText: 'Solo Cloud (Live)' }).innerText()).includes('✎') && (await ev(() => window.__bootleg.lib.tracks.find(x => x.title === 'Solo Cloud (Live)').orig.title)) === 'Solo Cloud');
+  t('…and nothing is sent to the server', mock.state.writes.length === w0 && mock.state.songs.find(x => x.id === 's3').title === 'Solo Cloud');
+  await ev(() => window.__bootleg.syncAll()); await sleep(400); t('a server sync keeps the edit', (await ev(() => window.__bootleg.lib.tracks.some(x => x.title === 'Solo Cloud (Live)'))));
+  t('edits are part of the notes export (they travel with ratings and notes)', (await ev(async () => (await window.__bootleg.notes.store.export()).tracks.some(x => x.edits?.title === 'Solo Cloud (Live)'))));
+  const live = pg.locator('#trackList .row', { hasText: 'Solo Cloud (Live)' }); await live.hover(); await live.locator('button:has-text("edit")').click(); await pg.waitForSelector('dialog.tagdlg[open]');
+  await pg.locator('dialog.tagdlg label', { hasText: 'Title' }).locator('button:has-text("revert")').click(); await pg.click('dialog.tagdlg button[type=submit]');
+  await pg.waitForFunction(() => window.__bootleg.lib.tracks.some(x => x.title === 'Solo Cloud' && x.genre === 'Live Funk'));
+  t('one field can be reverted to what the server says; the other edit stays', true);
+  await pg.click('.nav[data-view="albums"]'); await pg.click('#albumMode button[data-mode="list"]'); await pg.locator('#albumList .arow', { hasText: 'Cloud Album' }).click(); await pg.click('#albumDetail button:has-text("Edit album")');
+  await pg.waitForSelector('dialog.tagdlg[open]'); t('the album editor offers only the shared fields', (await pg.locator('dialog.tagdlg input[name=title]').count()) === 0);
+  await pg.fill('dialog.tagdlg input[name=year]', '1999'); await pg.click('dialog.tagdlg button[type=submit]'); await pg.waitForFunction(() => window.__bootleg.lib.tracks.filter(x => x.album === 'Cloud Album').every(x => +x.year === 1999));
+  t('an album edit applies to every track of the album', true); await pg.click('#albumMode button[data-mode="grid"]');
   t('the password is never stored (only a salted token)', !(await ev(() => localStorage.getItem('bootleg.libraries'))).includes('secret') && /"token":"[0-9a-f]{32}"/.test(await ev(() => localStorage.getItem('bootleg.libraries'))));
   await pg.click('.nav[data-view="tracks"]'); await pg.waitForSelector('#trackList .row'); await pg.locator('#trackList .row', { hasText: 'Remote One' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.5, null, { timeout: 20000 });
   const pk = await ev(async () => { let m = 0; for (let i = 0; i < 20; i++) { m = Math.max(m, ...window.__bootleg.feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } return m; });
@@ -255,9 +315,13 @@ try {
   await ev(() => window.__bootleg.player.seek(3)); await ev(() => { const v = document.getElementById('volume'); v.value = 0.5; v.oninput(); }); await pg.waitForFunction(() => window.__cast.some(c => c[0] === 'seek' && c[1] === 3) && window.__cast.some(c => c[0] === 'volume' && c[1] === 0.5)); t('seek and volume are forwarded', true);
   await pg.locator('#next').click(); await pg.waitForFunction(() => window.__cast.filter(c => c[0] === 'play').length === 2); t('changing track plays the new one on the device', true);
   await pg.click('#outBtn'); await pg.locator('#outMenu .orow:has-text("This computer")').click(); await pg.waitForFunction(() => window.__cast.some(c => c[0] === 'stop') && window.__bootleg.player.localOut === true); t('choosing "This computer" stops the device and restores local sound', (await pg.locator('#outName').innerText()) === 'This computer');
-  await ev(async () => window.__bootleg.notes.store.setRating(window.__bootleg.player.item ? 'file:' + window.__bootleg.player.item.src.path + '#' + window.__bootleg.player.item.src.size : 'x', 4));
+  await ev(async () => window.__bootleg.notes.store.setRating(window.__bootleg.player.item ? 'file:' + window.__bootleg.player.item.src.path + '#' : 'x', 4));
+  await ev(async () => { const b = window.__bootleg, x = b.lib.tracks.find(y => y.title === 'Remote One'), k = 'file:' + x.src.path + '#123';      // a record saved under the old key format (with the size)
+    await b.notes.store.b.put('t:' + k, { key: k, rating: 0, status: '', tags: [], notes: [{ id: 'm1', text: 'from before', at: null, to: null, kind: 'note', created: 1 }], provenance: null, fingerprint: null, edits: null, updated: 1 }); });
   await pg.reload(); await pg.waitForFunction(() => window.__bootleg && window.__bootleg.lib.tracks.length === 3, null, { timeout: 15000 });
+  t('records saved under the old server-track key move to the new one on start', (await ev(async () => { const b = window.__bootleg, x = b.lib.tracks.find(y => y.title === 'Remote One'); return (await b.notes.store.get('file:' + x.src.path + '#')).notes.some(n => n.text === 'from before') && !(await b.notes.store.b.get('t:file:' + x.src.path + '#123')); })));
   t('after a restart the remote library is back from the cache (no re-reading of files, no password asked)', (await ev(() => window.__bootleg.lib.tracks.every(x => x.tagged && x.src.kind === 'remote'))) && (await ev(() => window.__bootleg.libs.active)) === sid);
+  t('a rating given while casting reached the server too', mock.state.writes.some(w => w[0] === 'setRating' && w[1] === 's2' && w[2] === '4'), JSON.stringify(mock.state.writes));
   t('annotations on a server track survive too (keyed by the track\'s stable path)', (await ev(async () => (await window.__bootleg.notes.store.export()).tracks.some(x => x.key.startsWith('file:subsonic:') && x.rating === 4))));
   mock.state.songs.push(song('s4', 'Fresh Upload', 'Other Album', 'al2', 2)); mock.state.songs = mock.state.songs.filter(x => x.id !== 's2');
   await ev(() => window.__bootleg.syncAll()); await pg.waitForFunction(() => window.__bootleg.lib.tracks.length === 3 && window.__bootleg.lib.tracks.some(x => x.title === 'Fresh Upload') && !window.__bootleg.lib.tracks.some(x => x.title === 'Remote Two'), null, { timeout: 15000 });

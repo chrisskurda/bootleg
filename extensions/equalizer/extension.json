@@ -1,0 +1,7 @@
+{
+  "id": "equalizer",
+  "name": "Equalizer",
+  "version": "0.1.0",
+  "entry": "index.js",
+  "description": "A 10-band equalizer with presets, on its own page in the left pane. Shapes what you hear; the visualizer still sees the music as it is."
+}
