@@ -198,7 +198,7 @@ fn why(s: &Skip) -> &'static str {
         Skip::NeedsTranscode => "the player can't play this format (no transcoding yet)",
         Skip::TooBigForFat32 => "over 4 GB, too big for FAT32",
         Skip::NameTaken => "no free file name",
-        Skip::EmptyPlaylist => "none of its tracks could go on the card, so the playlist wasn’t written",
+        Skip::EmptyPlaylist => "none of its tracks could go on the device, so the playlist wasn’t written",
     }
 }
 
@@ -284,6 +284,8 @@ pub struct ApplyOut {
     pub bytes: u64,
     pub failed: Vec<(String, String)>,
     pub cancelled: bool,
+    /// files that read back wrong from the medium once and were written again
+    pub rewritten: usize,
 }
 
 #[tauri::command]
@@ -293,7 +295,7 @@ pub async fn device_apply(plan_id: u64, on_progress: tauri::ipc::Channel<Prog>) 
     tauri::async_runtime::spawn_blocking(move || {
         let mut dev = Device::open(&v).map_err(|e| e.to_string())?;
         let r = apply(&mut dev, &p, &mut Chan(on_progress), None).map_err(|e| e.to_string())?;
-        Ok(ApplyOut { copied: r.copied + r.transcoded, deleted: r.deleted, playlists: r.playlists, bytes: r.bytes, failed: r.failed, cancelled: r.cancelled })
+        Ok(ApplyOut { copied: r.copied + r.transcoded, deleted: r.deleted, playlists: r.playlists, bytes: r.bytes, failed: r.failed, cancelled: r.cancelled, rewritten: r.rewritten })
     })
     .await
     .map_err(|e| e.to_string())?

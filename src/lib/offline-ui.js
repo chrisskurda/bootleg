@@ -84,7 +84,7 @@ export function initOffline({ h, lib, notes, keyOf, toast, store, plural, getPlu
     const temp = cfg.cardFetch === 'temp', res = await fetchJobs(need, temp, onProgress);
     for (const r of res) {
       const key = r.id.slice(0, r.id.lastIndexOf('|'));
-      if (r.path) { map.set(key, r.path); if (!temp) held.set(r.id, card || 'a card'); } else failed.push({ key, why: r.error });
+      if (r.path) { map.set(key, r.path); if (!temp) held.set(r.id, card || 'a device'); } else failed.push({ key, why: r.error });
     }
     saveHeld(); if (!temp) load(await invoke('offline_info'));
     return { map, failed, fetched: res.filter(r => r.path).length };
@@ -134,7 +134,7 @@ export function initOffline({ h, lib, notes, keyOf, toast, store, plural, getPlu
       h('button', { class: 'mini', onclick: () => set({ rules: removeRule(cfg.rules, r) }) }, 'remove')));
     const rating = cfg.rules.find(r => r.type === 'rating');
     box.replaceChildren(
-      h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'Kept on this computer'), h('small', {}, info ? `${human(used)} of ${gb(limit)} · ${plural(n, 'file')}${heldBytes ? ` · ${human(heldBytes)} for device cards` : ''}${info.free != null ? ` · ${human(info.free)} free on that disk` : ''}` : 'Opening…')),
+      h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'Kept on this computer'), h('small', {}, info ? `${human(used)} of ${gb(limit)} · ${plural(n, 'file')}${heldBytes ? ` · ${human(heldBytes)} for devices` : ''}${info.free != null ? ` · ${human(info.free)} free on that disk` : ''}` : 'Opening…')),
         h('span', { class: 'sbtns' }, busy ? h('button', { class: 'btn', onclick: () => invoke('offline_cancel') }, 'Stop') : h('button', { class: 'btn', disabled: !cfg.on, onclick: () => sync() }, 'Sync now'))),
       info ? h('div', { class: 'dv-space', title: `${human(used)} of ${gb(limit)}` }, h('i', { class: 'ours', style: `width:${Math.min(100, used / Math.max(1, limit) * 100)}%` })) : '',
       busy ? h('div', { class: 'off-prog' }, h('div', { class: 'pbar' }, h('i', { style: 'width:0%' })), h('span', { class: 'small muted' }, busy)) : '',
@@ -146,13 +146,13 @@ export function initOffline({ h, lib, notes, keyOf, toast, store, plural, getPlu
       row('Also everything rated', 'Tracks with at least this rating.', h('select', { onchange: e => { const min = +e.target.value; set({ rules: min ? addRule(removeRule(cfg.rules, { type: 'rating' }), { type: 'rating', min }) : removeRule(cfg.rules, { type: 'rating' }) }); } },
         ...[[0, 'no'], [3, '3★ or more'], [4, '4★ or more'], [4.5, '4½★ or more'], [5, '5★']].map(([v, l]) => h('option', { value: v, selected: (rating?.min || 0) === v }, l)))),
       row('Also everything starred', 'Tracks tagged “starred” (a server’s favourites).', h('input', { type: 'checkbox', checked: hasRule(cfg.rules, { type: 'starred' }), onchange: e => set({ rules: e.target.checked ? addRule(cfg.rules, { type: 'starred' }) : removeRule(cfg.rules, { type: 'starred' }) }) })),
-      row('Space to use', 'At most this much (GB). Copies kept for device cards count too.', h('input', { type: 'number', min: 0, step: 1, value: cfg.maxGB, style: 'width:90px', onchange: e => set({ maxGB: Math.max(0, +e.target.value || 0) }) })),
+      row('Space to use', 'At most this much (GB). Copies kept for devices count too.', h('input', { type: 'number', min: 0, step: 1, value: cfg.maxGB, style: 'width:90px', onchange: e => set({ maxGB: Math.max(0, +e.target.value || 0) }) })),
       row('Quality', 'Original keeps the file as it is. High and Space saver ask the server to convert (Subsonic servers can; files on shares and stem servers stay original).', h('select', { onchange: e => set({ quality: e.target.value }) }, ...Object.entries(QUALITIES).map(([k, l]) => h('option', { value: k, selected: k === cfg.quality }, l)))),
       row('Stem sets', 'Off: their mix and details (a few MB). On: their stems too, to mute and solo offline.', h('input', { type: 'checkbox', checked: cfg.stems, onchange: e => set({ stems: e.target.checked }) })),
       row('Also keep what I play', 'Server tracks you play are kept too, up to their own limit; the least recently played go first. Off by default.', h('span', { class: 'sbtns' }, h('input', { type: 'checkbox', checked: cfg.auto, onchange: e => set({ auto: e.target.checked }) }), h('input', { type: 'number', min: 0, step: 1, value: cfg.autoGB, style: 'width:70px', title: 'GB', disabled: !cfg.auto, onchange: e => set({ autoGB: Math.max(0, +e.target.value || 0) }) }), h('span', { class: 'small muted' }, 'GB'))),
-      row('Server tracks for device cards', 'When a card sync needs server tracks that aren’t kept yet: keep them here too (no second download next time), or fetch them just for the copy.', h('select', { onchange: e => set({ cardFetch: e.target.value }) }, h('option', { value: 'keep', selected: cfg.cardFetch !== 'temp' }, 'Keep them offline (default)'), h('option', { value: 'temp', selected: cfg.cardFetch === 'temp' }, 'Temporary, only for the copy'))),
+      row('Server tracks for devices', 'When a device sync needs server tracks that aren’t kept yet: keep them here too (no second download next time), or fetch them just for the copy.', h('select', { onchange: e => set({ cardFetch: e.target.value }) }, h('option', { value: 'keep', selected: cfg.cardFetch !== 'temp' }, 'Keep them offline (default)'), h('option', { value: 'temp', selected: cfg.cardFetch === 'temp' }, 'Temporary, only for the copy'))),
       row('Where', info ? info.dir : '', h('span', { class: 'sbtns' }, h('button', { class: 'btn', onclick: async () => { const d = await T.dialog?.open?.({ directory: true }).catch(() => null); if (d) set({ dir: String(d) }); } }, 'Choose folder…'), cfg.dir ? h('button', { class: 'link', onclick: () => set({ dir: '' }) }, 'default') : '')),
-      held.size ? row('Kept for device cards', `${plural(held.size, 'file')} fetched for card syncs. Let them go to free the space (the next card sync fetches what it needs again; anything a rule above wants is fetched again by the next sync).`, h('button', { class: 'btn', onclick: async () => { const ids = [...held.keys()]; held.clear(); saveHeld(); load(await invoke('offline_remove', { ids })); soon(); } }, 'Let them go')) : '',
+      held.size ? row('Kept for devices', `${plural(held.size, 'file')} fetched for device syncs. Let them go to free the space (the next device sync fetches what it needs again; anything a rule above wants is fetched again by the next sync).`, h('button', { class: 'btn', onclick: async () => { const ids = [...held.keys()]; held.clear(); saveHeld(); load(await invoke('offline_remove', { ids })); soon(); } }, 'Let them go')) : '',
     );
     if (busy && progress) paintProgress();
   }

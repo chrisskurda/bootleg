@@ -40,7 +40,7 @@ export function filesFor(tracks, { keyOf, stems = false, localOf = () => null })
     if (t.kind === 'render') {
       if (t.pkgSrc) { skipped.push({ track: key, title: t.title, why: 'stem packages (.bstem / .bsong) are not synced yet' }); continue; }
       const folder = `Stem sets/${clean(t.artist) ? clean(t.artist) + ' - ' : ''}${clean(t.title) || base(t.dir)}`;
-      if (!t.mix?.path) { skipped.push({ track: key, title: t.title, why: 'no mix file (render one, or turn on stems for this card)' }); if (!stems) continue; }
+      if (!t.mix?.path) { skipped.push({ track: key, title: t.title, why: 'no mix file (render one, or turn on stems for this device)' }); if (!stems) continue; }
       else want(key, key, t.mix, `${folder}/mix.${ext(t.mix.name || t.mix.path)}`, t.title);
       if (t.mix?.kind === 'remote' || t.manifestSrc?.kind === 'remote') {         // a stem server song: its files are separate items
         for (const [src, name] of [[t.manifestSrc, 'manifest.json'], [t.clipsSrc, 'clips.json'], [t.coverSrc, base(t.coverSrc?.name || t.coverSrc?.path || '')]]) if (src) want(key, `${key}|${name}`, src, `${folder}/${name}`, t.title);
@@ -136,6 +136,6 @@ export function human(n) {
 
 export const MODES = {
   add: { label: 'Add', hint: 'Copies new music in; never deletes anything.' },
-  mirror: { label: 'Mirror', hint: 'The card holds exactly the selection; bootleg removes its own files you dropped. All or nothing.' },
-  fill: { label: 'Fill', hint: 'Fills the card up to the space you allow, in order; rotates what was there before.' },
+  mirror: { label: 'Mirror', hint: 'The device holds exactly the selection; bootleg removes its own files you dropped. All or nothing.' },
+  fill: { label: 'Fill', hint: 'Fills the device up to the space you allow, in order; rotates what was there before.' },
 };

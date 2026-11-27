@@ -49,7 +49,7 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
 
   async function check(m) {
     const s = st(m.volume); s.confirm = false; s.msg = '';
-    if (!hasSelection(m)) { s.plan = null; s.msg = 'Nothing is chosen for this card yet: tick one or more playlists below, or pick “Also rated” / “Also starred”.'; paint(); return null; }
+    if (!hasSelection(m)) { s.plan = null; s.msg = 'Nothing is chosen for this device yet: tick one or more playlists below, or pick “Also rated” / “Also starred”.'; paint(); return null; }
     s.busy = 'Checking…'; paint();
     try {
       const sel = await selection(m);
@@ -84,7 +84,7 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
       const r = await invoke('device_apply', { planId: s.plan.id, onProgress: ch });
       await invoke('device_write_notes', { volume: m.volume, doc: await notesFor(notes, s.keys || []) }).catch(() => {});
       toast(r.cancelled ? `Stopped. ${plural(r.copied, 'file')} copied so far.` : `${m.name}: ${plural(r.copied, 'file')} copied (${human(r.bytes)}), ${r.deleted} removed${r.failed.length ? `, ${r.failed.length} failed` : ''}`, !!r.failed.length);
-      s.msg = r.failed.length ? r.failed.slice(0, 5).map(([p, e]) => `${p}: ${e}`).join('\n') : '';
+      s.msg = [r.rewritten ? `${plural(r.rewritten, 'file')} read back wrong from ${m.name} and had to be written again. Every file was checked, so what's there is right — but a device that does this may be failing: test it (f3 on a Mac or Linux, H2testw on Windows).` : '', ...r.failed.slice(0, 5).map(([p, e]) => `${p}: ${e}`)].filter(Boolean).join('\n');
     } catch (e) { toast(String(e.message || e), true); }
     s.plan = null; s.busy = null; s.progress = null; s.confirm = false; s.fetched = null; s.remote = null; s.pending = null;
     await offline?.afterCard(); await refresh();
@@ -107,7 +107,7 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
 
   function pairForm(m) {
     const name = h('input', { value: m.label, 'aria-label': 'Name' }), mode = h('select', { 'aria-label': 'Mode' }, ...Object.entries(MODES).map(([k, x]) => h('option', { value: k }, x.label)));
-    const folder = h('input', { value: 'Music/bootleg', 'aria-label': 'Folder on the card', title: 'bootleg’s music goes in this folder on the card' });
+    const folder = h('input', { value: 'Music/bootleg', 'aria-label': 'Folder on the device', title: 'bootleg’s music goes in this folder on the device' });
     return h('div', { class: 'lib-head' }, name, mode, folder,
       h('button', { class: 'btn primary', onclick: async () => {
         try { const n = await invoke('device_pair', { volume: m.volume, name: name.value || m.label, mode: mode.value, root: folder.value, kind: null }); remember(n); toast(`Paired ${n.name}`); refresh(); }
@@ -125,10 +125,10 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
     const parts = [`${plural(p.copy, 'file')} to copy (${human(p.bytes_in)})`, p.delete ? `${p.delete} of bootleg’s files to remove (${human(p.bytes_freed)} freed)` : '', p.playlists ? plural(p.playlists, 'playlist') : '', `${p.unchanged} already there`, p.kept_unselected ? `${p.kept_unselected} no longer chosen but kept (Add mode never deletes)` : ''].filter(Boolean);
     if (s.pending?.n) out.push(h('div', { class: 'small' }, `First, ${plural(s.pending.n, 'server file')} to download${s.pending.bytes ? ` (about ${human(s.pending.bytes)})` : ''}, ${offline?.config.cardFetch === 'temp' ? 'just for this copy' : 'kept offline on this computer too'} (Settings → Offline). The numbers below are for what’s here already.`));
     out.push(h('div', { class: p.short_by ? 'err' : 'small' }, p.short_by ? `Doesn’t fit: ${human(p.short_by)} short. Mirror copies all or nothing; choose less, free space, or use Fill.` : parts.join(' · ')));
-    if (s.confirm) out.push(h('div', { class: 'dv-confirm' }, h('span', {}, `This removes ${plural(p.delete, 'file')} bootleg put on the card. Files you put there yourself are never touched.`), h('button', { class: 'btn primary', onclick: () => sync(m) }, 'Remove and sync'), h('button', { class: 'btn', onclick: () => { s.confirm = false; s.plan = null; paint(); } }, 'Cancel')));
+    if (s.confirm) out.push(h('div', { class: 'dv-confirm' }, h('span', {}, `This removes ${plural(p.delete, 'file')} bootleg put on the device. Files you put there yourself are never touched.`), h('button', { class: 'btn primary', onclick: () => sync(m) }, 'Remove and sync'), h('button', { class: 'btn', onclick: () => { s.confirm = false; s.plan = null; paint(); } }, 'Cancel')));
     if (p.renamed.length) out.push(h('div', { class: 'small muted' }, `${plural(p.renamed.length, 'track')} got a “(bootleg)” name because a file of yours already has that name.`));
     if (p.skipped.length) out.push(h('details', { class: 'small', open: !p.copy && !p.unchanged }, h('summary', {}, `${p.skipped.length} left out`), h('ul', {}, ...p.skipped.slice(0, 300).map(x => h('li', {}, h('b', {}, x.title || x.track), ' — ', x.why)))));
-    if (p.preview.length) out.push(h('details', { class: 'small' }, h('summary', {}, 'What changes on the card'), h('pre', { class: 'dv-preview' }, p.preview.join('\n') + (p.copy + p.delete + p.playlists > p.preview.length ? '\n…' : ''))));
+    if (p.preview.length) out.push(h('details', { class: 'small' }, h('summary', {}, 'What changes on the device'), h('pre', { class: 'dv-preview' }, p.preview.join('\n') + (p.copy + p.delete + p.playlists > p.preview.length ? '\n…' : ''))));
     return h('div', { class: 'dv-plan' }, ...out);
   }
 
@@ -170,18 +170,18 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
       m.recovered ? h('div', { class: 'small muted' }, m.recovered) : '',
       h('div', { class: 'small muted' }, 'Player: ', player),
       row('Mode', MODES[m.mode]?.hint, h('select', { onchange: e => set(m, { mode: e.target.value }) }, ...Object.entries(MODES).map(([k, x]) => h('option', { value: k, selected: k === m.mode }, x.label)))),
-      row('Playlists', 'Copied in this order, first ones first when space runs out. Each is also written to the card as an .m3u8.', plBoxes),
+      row('Playlists', 'Copied in this order, first ones first when space runs out. Each is also written to the device as an .m3u8.', plBoxes),
       row('Also rated', 'Every track with at least this rating.', h('select', { onchange: e => set(m, { select: { ...sel, min_rating: +e.target.value } }) }, ...Object.entries(RATINGS).map(([k, l]) => h('option', { value: k, selected: +k === (+sel.min_rating || 0) }, l)))),
       row('Also starred', 'Tracks tagged “starred” (a server’s favourites).', h('input', { type: 'checkbox', checked: !!sel.starred, onchange: e => set(m, { select: { ...sel, starred: e.target.checked } }) })),
-      offline ? row('Server tracks', 'Quality of server tracks on this card. High and Space saver are converted by the server (MP3), so they fit more and play on any player.', h('select', { onchange: e => set(m, { select: { ...sel, quality: e.target.value || undefined } }) }, h('option', { value: '', selected: !sel.quality }, `Same as Offline (${QUALITIES[offline.config.quality]?.split(':')[0] || 'Original'})`), ...Object.entries(QUALITIES).map(([k, l]) => h('option', { value: k, selected: sel.quality === k }, l)))) : '',
+      offline ? row('Server tracks', 'Quality of server tracks on this device. High and Space saver are converted by the server (MP3), so they fit more and play on any player.', h('select', { onchange: e => set(m, { select: { ...sel, quality: e.target.value || undefined } }) }, h('option', { value: '', selected: !sel.quality }, `Same as Offline (${QUALITIES[offline.config.quality]?.split(':')[0] || 'Original'})`), ...Object.entries(QUALITIES).map(([k, l]) => h('option', { value: k, selected: sel.quality === k }, l)))) : '',
       row('Stems', 'Stem sets go as their mix and details by default (a few MB). With this on, their stems go too.', h('input', { type: 'checkbox', checked: m.stems, onchange: e => set(m, { stems: e.target.checked }) })),
-      row('Keep free', 'Space to leave on the card (e.g. 2GB). Fill and Add stop there.', h('input', { value: m.keep_free, placeholder: '0', style: 'width:90px', onchange: e => set(m, { keep_free: e.target.value }) })),
+      row('Keep free', 'Space to leave free on the device (e.g. 2GB). Fill and Add stop there.', h('input', { value: m.keep_free, placeholder: '0', style: 'width:90px', onchange: e => set(m, { keep_free: e.target.value }) })),
       m.outbox ? h('div', { class: 'dv-out' }, h('span', {}, `${m.outbox.toLocaleString()} ${m.outbox === 1 ? 'play, rating or note' : 'plays, ratings and notes'} from the player waiting.`), h('button', { class: 'btn', onclick: async () => { await bringBack(m).catch(e => toast(String(e), true)); refresh(); } }, 'Bring them in')) : '',
       h('div', { class: 'cbtns' },
         h('button', { class: 'btn', disabled: !!s.busy, onclick: () => check(m) }, 'Check'),
         h('button', { class: 'btn primary', disabled: !!s.busy || !!m.error, onclick: () => sync(m) }, 'Sync'),
         h('span', { class: 'grow' }),
-        s.unpair ? h('span', { class: 'dv-confirm' }, 'Unpair? The music stays on the card as ordinary files.', h('button', { class: 'btn', onclick: async () => { try { await invoke('device_unpair', { volume: m.volume }); forget(m.id); toast(`Unpaired ${m.name}`); } catch (e) { toast(String(e), true); } s.unpair = false; refresh(); } }, 'Unpair'), h('button', { class: 'link', onclick: () => { s.unpair = false; paint(); } }, 'cancel'))
+        s.unpair ? h('span', { class: 'dv-confirm' }, 'Unpair? The music stays on the device as ordinary files.', h('button', { class: 'btn', onclick: async () => { try { await invoke('device_unpair', { volume: m.volume }); forget(m.id); toast(`Unpaired ${m.name}`); } catch (e) { toast(String(e), true); } s.unpair = false; refresh(); } }, 'Unpair'), h('button', { class: 'link', onclick: () => { s.unpair = false; paint(); } }, 'cancel'))
           : h('button', { class: 'link', onclick: () => { s.unpair = true; paint(); } }, 'Unpair…')),
       planBox(m));
   }
@@ -193,20 +193,20 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
 
   async function paint() {
     if (root.hidden) return;
-    if (!invoke) { root.replaceChildren(h('div', { class: 'empty' }, h('b', {}, 'Players and SD cards'), h('br'), 'Syncing to players needs the bootleg desktop app.')); return; }
+    if (!invoke) { root.replaceChildren(h('div', { class: 'empty' }, h('b', {}, 'Players, cards and drives'), h('br'), 'Syncing to players needs the bootleg desktop app.')); return; }
     const playlists = await notes.playlists();
     const paired = media.filter(m => m.paired), others = media.filter(m => !m.paired);
     const away = Object.values(known()).filter(k => !paired.some(m => m.id === k.id));
     root.replaceChildren(h('div', { class: 'settings devices' },
-      h('div', { class: 'lib-head' }, h('h3', { class: 'grow' }, 'Players and SD cards'), h('button', { class: 'btn', onclick: refresh }, loading ? 'Looking…' : 'Refresh'),
-        h('button', { class: 'btn', title: 'Pair a folder that isn’t listed (a player mounted somewhere else)', onclick: async () => { const d = await T.dialog.open({ directory: true, title: 'The player’s or card’s folder' }); if (!d) return; media.push({ volume: d, label: d.split(/[\\/]/).pop(), paired: false }); paint(); } }, 'Use a folder…')),
-      h('div', { class: 'muted small' }, 'bootleg only ever replaces or removes files it put on a card itself (it keeps a list in a hidden .bootleg folder there). Your own files are never touched.'),
+      h('div', { class: 'lib-head' }, h('h3', { class: 'grow' }, 'Players, cards and drives'), h('button', { class: 'btn', onclick: refresh }, loading ? 'Looking…' : 'Refresh'),
+        h('button', { class: 'btn', title: 'Pair a folder that isn’t listed (a player mounted somewhere else)', onclick: async () => { const d = await T.dialog.open({ directory: true, title: 'The device’s folder' }); if (!d) return; media.push({ volume: d, label: d.split(/[\\/]/).pop(), paired: false }); paint(); } }, 'Use a folder…')),
+      h('div', { class: 'muted small' }, 'bootleg only ever replaces or removes files it put on a device itself (it keeps a list in a hidden .bootleg folder there). Your own files are never touched.'),
       ...paired.map(m => pairedCard(m, playlists)),
       others.length ? h('h3', {}, 'Not paired') : '',
       ...others.map(m => h('div', { class: 'lib-card' }, h('div', { class: 'lib-head' }, h('b', {}, m.label), h('span', { class: 'muted small' }, m.volume), h('span', { class: 'grow' }), h('span', { class: 'small muted' }, `${human(m.free)} free of ${human(m.total)}${m.fat32 ? ' · FAT32' : ''}`)), h('div', { class: 'muted small' }, 'Pairing writes only a .bootleg folder on it.'), pairForm(m))),
       away.length ? h('h3', {}, 'Paired, not connected') : '',
       ...away.map(k => h('div', { class: 'srow' }, h('span', {}, h('b', {}, k.name), h('small', {}, `Last seen ${new Date(k.lastSeen).toLocaleString()}${k.player ? ` in ${k.player}` : ''} at ${k.volume}`)), h('button', { class: 'link', onclick: () => { forget(k.id); paint(); } }, 'forget'))),
-      !media.length && !away.length ? h('div', { class: 'empty' }, h('b', {}, 'No cards or players found.'), h('br'), 'Connect a player or put in an SD card, then press Refresh.') : ''));
+      !media.length && !away.length ? h('div', { class: 'empty' }, h('b', {}, 'No players, cards or drives found.'), h('br'), 'Connect a player, put in an SD card or plug in a USB drive, then press Refresh. (Phones over MTP and sync over Wi-Fi come later.)') : ''));
   }
 
   return {
