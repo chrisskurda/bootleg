@@ -21,6 +21,9 @@ pub struct Item {
     pub src_fp: String,
     /// lowercase extension / codec of the source
     pub codec: String,
+    /// copy only `(offset, length)` bytes of `src`: an uncompressed entry inside a package (a `.bstem` is a zip whose
+    /// audio is stored, not deflated). `size` is then the entry's length. Ranged sources can't be transcoded.
+    pub range: Option<(u64, u64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +42,7 @@ pub struct PlanOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
     /// copy (or transcode) a track to `dest`; `replaces` = overwrite bootleg's own older copy there
-    Copy { track: String, src: PathBuf, dest: String, size: u64, src_fp: String, transcode: Option<String>, replaces: bool },
+    Copy { track: String, src: PathBuf, range: Option<(u64, u64)>, dest: String, size: u64, src_fp: String, transcode: Option<String>, replaces: bool },
     /// delete a file bootleg wrote (always a manifest path)
     Delete { path: String, size: u64 },
     Playlist { name: String, dest: String, content: Vec<u8>, replaces: bool },
@@ -52,6 +55,8 @@ pub enum Skip {
     TooBigForFat32,
     /// no free name found (more than 99 collisions)
     NameTaken,
+    /// a playlist none of whose tracks are on the medium (all skipped, or not copyable): not written
+    EmptyPlaylist,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -129,7 +134,7 @@ pub fn plan(dev: &Device, items: &[Item], playlists: &[PlaylistSpec], disk: &Dis
     for it in items {
         let transcode = if prof.plays(&it.codec) {
             None
-        } else if opts.can_transcode && !prof.transcode_to.is_empty() {
+        } else if opts.can_transcode && !prof.transcode_to.is_empty() && it.range.is_none() {
             Some(prof.transcode_to.clone())
         } else {
             p.skipped.push((it.track.clone(), Skip::NeedsTranscode));
@@ -181,7 +186,7 @@ pub fn plan(dev: &Device, items: &[Item], playlists: &[PlaylistSpec], disk: &Dis
             }
         };
         taken.insert(key(&dest));
-        let op = Op::Copy { track: it.track.clone(), src: it.src.clone(), dest: dest.clone(), size: it.size, src_fp: it.src_fp.clone(), transcode, replaces };
+        let op = Op::Copy { track: it.track.clone(), src: it.src.clone(), range: it.range, dest: dest.clone(), size: it.size, src_fp: it.src_fp.clone(), transcode, replaces };
         copies.push((op, it.size, frees, old));
         placed.insert(it.track.clone(), dest);
     }
@@ -229,6 +234,10 @@ pub fn plan(dev: &Device, items: &[Item], playlists: &[PlaylistSpec], disk: &Dis
     let mut pl_paths = HashSet::new();
     for pl in playlists {
         let dest = safe_path(&cfg.root, &format!("Playlists/{}.{ext}", pl.name), prof);
+        if !pl.tracks.iter().any(|t| placed.contains_key(t)) {
+            p.skipped.push((format!("playlist:{}", pl.name), Skip::EmptyPlaylist));
+            continue;
+        }
         let mut text = String::from("#EXTM3U\n");
         for t in &pl.tracks {
             if let Some(path) = placed.get(t) {
