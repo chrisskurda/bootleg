@@ -1,6 +1,7 @@
 // A "source" is one file the player can read: from a browser File (web) or a path on disk (desktop, through Tauri's asset protocol).
 //   { kind, name, path ('/'-separated; relative for web, absolute for desktop), size, reader(), url(), text() }
 import { blobReader } from './tags.js';
+import { offlineUrl } from './offline-hook.js';
 const norm = p => String(p).replace(/\\/g, '/');
 export const AUDIO_RE = /\.(mp3|flac|m4a|aac|ogg|opus|wav|aif|aiff|caf)$/i;
 export const NFO_RE = /\.nfo$/i;
@@ -17,7 +18,7 @@ function rangeReader(url, size) {
 }
 export function tauriSource(absPath, size, mtime = 0) {
   const p = norm(absPath); let url = null; const U = () => (url ||= window.__TAURI__.core.convertFileSrc(absPath));      // lazy: libraries have tens of thousands of these
-  return { kind: 'tauri', name: p.split('/').pop(), path: p, size, mtime, reader: () => rangeReader(U(), size), url: U, text: async () => (await fetch(U())).text() };
+  return { kind: 'tauri', name: p.split('/').pop(), path: p, size, mtime, reader: () => rangeReader(U(), size), url: () => offlineUrl(p) || U(), text: async () => (await fetch(U())).text() };     // url(): a kept offline copy first (a share that isn't mounted)
 }
 
 // Desktop: everything under a folder (recursively), as sources. The folder is first allowed for streaming (Rust command) — nothing outside what the user picked is readable.

@@ -31,6 +31,7 @@ import { MiniHost } from '/lib/mini-host.js';
 import { SHARE_DEFAULTS, openExternal } from '/lib/share.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 import { initDevices } from '/lib/devices-ui.js';
+import { initOffline } from '/lib/offline-ui.js';
 import { filesFor } from '/lib/devices.js';
 import { registerProvider, listProviders, lookupAll, Chosen } from '/lib/metadata.js';
 import { Secrets, connKey, splitConfig, fullConfig, migrateConnections } from '/lib/secrets.js';
@@ -48,7 +49,7 @@ const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
 // ------------------------------------------------------------------ views
-let view = 'tracks', devices = null;      // devices: the Devices page (set up once the notes store exists)
+let view = 'tracks', devices = null, offline = null;      // devices: the Devices page; offline: the offline store (both set up once the notes store exists)
 // The visualizer stage sits over the Now playing tile or the Visualizer page, or floats as a mini player elsewhere (viz-dock.js).
 const vizDock = new VizDock({ stage: $('#vizStage'), area: $('#main'), onChange: () => syncViz() });
 // analysing while the stage shows, and on Now playing even with the tile scrolled away (the stem meters use the same analysis)
@@ -182,7 +183,7 @@ function renderSplit(list) {
 }
 async function paintSplitPane(list = lib.albums().filter(a => { const q = $('#search').value.toLowerCase(); return !q || (a.album + ' ' + a.artist).toLowerCase().includes(q); })) {
   const a = list.find(x => x.key === splitKey); if (!a) return; const tok = ++splitToken;
-  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, editTags, trackStore: t => notes.store.get(trackKey(t)), meta: { providers: listProviders, chosen: metaChosen, lookup: q => lookupAll(q), open: openExternal, repaint: () => paintSplitPane() } });
+  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, editTags, trackStore: t => notes.store.get(trackKey(t)), offline, meta: { providers: listProviders, chosen: metaChosen, lookup: q => lookupAll(q), open: openExternal, repaint: () => paintSplitPane() } });
   if (tok === splitToken) { const pane = $('#splitPane'), keep = pane.scrollTop; pane.replaceChildren(el); pane.scrollTop = keep; }
 }
 $('#view-albums').addEventListener('scroll', () => { const v = $('#view-albums'); if (settings.albumView === 'grid' && $('#albumGrid').dataset.more && v.scrollTop + v.clientHeight > v.scrollHeight - 700) { gridLimit += 300; renderAlbums(); } }, { passive: true });
@@ -549,6 +550,7 @@ async function paintSettings() {
     row('Mini visualizer while browsing', 'Keeps the visualizer in the corner on the other pages (the ▭ button on the visualizer does the same).', h('input', { type: 'checkbox', id: 'set-vizFloat', checked: !!settings.vizFloat, onchange: e => { settings.vizFloat = e.target.checked; applySettings(); placeViz(); } })),
     TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
     ...(tagFiles ? tagFileSettings(row, chk, num) : []),
+    ...(offline ? offline.settingsSection() : []),
     h('h3', {}, 'Notes and data'),
     row('Export notes', 'Everything you wrote and rated — notes, ratings, tags, provenance, tag edits and playlists — as one JSON file.', h('button', { class: 'btn', id: 'notesExport', onclick: () => notes.exportNotes() }, 'Export notes…')),
     row('Import notes', 'Merges a bootleg notes file into yours; nothing you have is overwritten with older data.', h('button', { class: 'btn', id: 'notesImport', onclick: () => notes.importNotes() }, 'Import notes…')),
@@ -642,8 +644,9 @@ async function saveText(name, text, mime, fullPath) {
   if (TAURI?.dialog && TAURI?.fs?.writeTextFile) { const p = await TAURI.dialog.save({ defaultPath: fullPath || name }); if (!p) return; await TAURI.fs.writeTextFile(p, text); toast('Saved ' + p.split('/').pop()); return; }
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime })), download: name }); document.body.append(a); a.click(); a.remove(); toast('Saved ' + name);
 }
-const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: (ts, i = 0) => acts.now(ts, i), shareOpts: () => settings });
-devices = initDevices({ root: $('#view-devices'), h, lib, notes: notes.store, keyOf: trackKey, toast, store, plural });     // players and SD cards (desktop)
+const notes = initNotes({ backend: SELF ? new MemoryBackend() : null, player, lib, libs, h, fmt, toast, show, saveText, $, playNow: (ts, i = 0) => acts.now(ts, i), shareOpts: () => settings, offline: () => offline });
+offline = initOffline({ h, lib, notes: notes.store, keyOf: trackKey, toast, store, plural, getPlugin: getSource, sessionOf, player });     // Settings → Offline (desktop)
+devices = initDevices({ root: $('#view-devices'), h, lib, notes: notes.store, keyOf: trackKey, toast, store, plural, offline });     // players and SD cards (desktop)
 let nowKV; try { nowKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV(); } catch { nowKV = new MapKV(); }
 const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fmt, $, editTags, heat: new ListenHeat(nowKV), spectros: new SpectroCache(nowKV), isShown: () => view === 'now',
   connTitle: id => libs.allConnections().find(c => c.conn.id === id)?.conn.title || '', spectroMode: () => settings.spectro,
@@ -731,6 +734,16 @@ async function selfTest(dir) {
         out.secretMigrated = moved === 1 && !('token' in libs.connection('mig').config) && (await secrets.getJSON('source/subsonic/mig'))?.token === 'legacy'; await removeConnection(L, libs.connection('mig')); out.secretMigrated &&= (await secrets.get('source/subsonic/mig')) === null;
         { const ps = extApi('selftest-ext').secrets; await ps.set('cert', 'x'); secrets.cache.delete('plugin/selftest-ext/cert'); out.extSecret = (await ps.get('cert')) === 'x' && (await TAURI.core.invoke('secret_get', { key: 'plugin/selftest-ext/cert' })) === 'x'; await ps.delete('cert'); } }
       const r = await syncConnection(conn, L); out.remoteTracks = r.total; const rt = lib.tracks.find(t => t.remote); await player.playList([rt], 0); await wait(() => player.playing && player.pos() > 0.7); let pk = 0; for (let i = 0; i < 20; i++) { pk = Math.max(pk, ...feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } out.remotePeak = pk; out.remoteBlob = player.audio.src.startsWith('blob:');
+      if (offline) {      // the offline store end to end: keep a server track (Rust download), play from the copy, sync it to a card from there
+        try {
+          const got = await offline.localFor([rt.src], { quality: 'original', card: 'self-test' }), kp = got.map.get(rt.src.path);
+          const { files: ff, remote: rr } = filesFor([rt], { keyOf: trackKey, localOf: x => offline.keptPath(x, 'original') });
+          const u = rt.src.url(), copy = await rt.src.fetch().then(r => r.arrayBuffer()).catch(e => { throw new Error(`read the kept copy (${u.slice(0, 60)}): ${e.message}`); });
+          const sp = getSource('subsonic'), ses = sessionOf(rt.src.remote), orig = await sp.fetch(ses, sp.streamUrl(ses, rt.src.remote.item)).then(r => r.arrayBuffer()).catch(() => null);
+          out.offline = !!kp && !got.failed.length && offline.keptPath(rt.src, 'original') === kp && !/^https?:/.test(u) && copy.byteLength > 1000 && (!orig || orig.byteLength === copy.byteLength) && rr.length === 0 && ff[0]?.path === kp;
+          if (!out.offline) out.offlineDiag = JSON.stringify({ kp, failed: got.failed, u: u.slice(0, 40), copy: copy.byteLength, orig: orig?.byteLength, rr: rr.length, ff });
+        } catch (e) { out.offlineDiag = String(e?.message || e); }
+      }
     }
     const dlRaw = await TAURI.core.invoke('selftest_dlna'), [dl, dlFlags = ''] = (dlRaw || '').split(';');
     if (dl && !out.autoplayBlocked) {       // casting end to end against a mock DLNA renderer: control (SOAP), the LAN media server, transport mirroring

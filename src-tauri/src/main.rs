@@ -9,6 +9,7 @@
 
 use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 mod devices;
+mod offline;
 mod secrets;
 mod dlna;
 mod scan;
@@ -214,7 +215,7 @@ fn main() {
     #[cfg(feature = "plugin-acoustid")] { builder = builder.plugin(bootleg_plugin_acoustid::init()); }
     #[cfg(feature = "plugin-capture")] { builder = builder.plugin(bootleg_plugin_capture::init()); }
     builder
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, plugin_runtime, plugin_job_cancel, devices::devices_list, devices::device_pair, devices::device_unpair, devices::device_settings, devices::device_plan, devices::device_apply, devices::device_cancel, devices::device_outbox, devices::device_outbox_ack, devices::device_write_notes, secrets::secret_status, secrets::secret_get, secrets::secret_set, secrets::secret_delete])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, plugin_runtime, plugin_job_cancel, devices::devices_list, devices::device_pair, devices::device_unpair, devices::device_settings, devices::device_plan, devices::device_apply, devices::device_cancel, devices::device_outbox, devices::device_outbox_ack, devices::device_write_notes, offline::offline_open, offline::offline_info, offline::offline_fetch, offline::offline_cancel, offline::offline_remove, offline::offline_touch, offline::offline_clear_temp, secrets::secret_status, secrets::secret_get, secrets::secret_set, secrets::secret_delete])
         .on_window_event(main_window_event)
         .setup(move |app| {
             // Native plugins' permissions, for the player window only, and only for those compiled into this build (§5.4)

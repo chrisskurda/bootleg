@@ -73,6 +73,8 @@ export const stemserver = {
     }
   },
   streamUrl: (ses, it) => `${ses.base}/${it.href}`,
+  offline: true,                                                         // songs' files, as they are (no conversion on this server)
+  download: (ses, it) => ({ url: `${ses.base}/${it.href}`, ext: (it.rel.split('.').pop() || 'bin').toLowerCase(), quality: 'original' }),
   fetch: (ses, u, init) => netFetch(u, init),
   async playlists(ses) { if (ses.api < 2) return []; return (await call(ses, 'api/v2/playlists')).map(p => ({ id: p.name, name: p.name, owner: '', items: p.items })); },
   async setRating(ses, id, stars) { if (ses.api < 2) return; await call(ses, `api/v2/songs/${encodeURIComponent(id)}/annotations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rating: stars }) }); },

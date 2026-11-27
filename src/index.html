@@ -54,6 +54,7 @@
       </section>
       <section id="view-playlists" class="view" hidden>
         <div class="toolbar"><input id="plName" placeholder="Name for the current queue…"><button id="plSave" class="btn primary">Save queue as playlist</button><button id="plImport" class="btn">Import M3U…</button><label id="plHidden" class="muted" hidden><input type="checkbox" id="plShowHidden"> show hidden (<span id="plHiddenN"></span>)</label></div>
+        <div class="toolbar plfind"><input id="plSearch" type="search" placeholder="Find a playlist by its name, or by a track, artist or album in it…" aria-label="Find a playlist"><select id="plSource" aria-label="Which playlists"><option value="all">All playlists</option><option value="mine">Mine</option><option value="server">From servers</option></select><select id="plSort" aria-label="Sort"><option value="name">Name</option><option value="size">Most tracks</option><option value="recent">Recently changed</option></select><span id="plCount" class="muted small"></span></div>
         <div id="plList" class="cards feed"></div><div id="emptyPl" class="empty">No playlists yet. Fill the queue, name it above and save — or import an .m3u / .m3u8 from another player.</div>
       </section>
 

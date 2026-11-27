@@ -198,6 +198,7 @@ fn why(s: &Skip) -> &'static str {
         Skip::NeedsTranscode => "the player can't play this format (no transcoding yet)",
         Skip::TooBigForFat32 => "over 4 GB, too big for FAT32",
         Skip::NameTaken => "no free file name",
+        Skip::EmptyPlaylist => "none of its tracks could go on the card, so the playlist wasn’t written",
     }
 }
 
@@ -209,7 +210,7 @@ pub fn items_from(input: Vec<ItemIn>) -> (Vec<Item>, Vec<Skipped>) {
             Ok(m) if m.is_file() => {
                 let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
                 let codec = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                items.push(Item { track: i.track, src: p, rel: i.rel, size: m.len(), src_fp: format!("{}:{mtime}", m.len()), codec });
+                items.push(Item { track: i.track, src: p, rel: i.rel, size: m.len(), src_fp: format!("{}:{mtime}", m.len()), codec, range: None });
             }
             _ => skipped.push(Skipped { track: i.track, why: "file not found on this computer".into() }),
         }

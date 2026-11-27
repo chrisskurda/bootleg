@@ -2,6 +2,7 @@
 import { parseNfo, buildAlbumNfo, nfoRatingToStars } from './nfo.js';
 import { MODES, STATUSES } from './libraries.js';
 import { albumKey } from './album-details.js';
+import { searchPlaylists, summaryOf } from './playlist-search.js';
 import { openShare, feedMarkdown, SHARE_DEFAULTS } from './share.js';
 import { NotesStore, IdbBackend, MemoryBackend, PROVENANCE_KINDS, toM3U, parseM3U, matchEntries } from './notes.js';
 
@@ -21,7 +22,7 @@ export function stars(h, value, onset) {
   return el;
 }
 
-export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $, playNow = (ts, i = 0) => player.playList(ts, i), shareOpts = () => SHARE_DEFAULTS }) {
+export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, show, saveText, $, playNow = (ts, i = 0) => player.playList(ts, i), shareOpts = () => SHARE_DEFAULTS, offline = () => null }) {
   const drafts = new Map(); let backend = given; if (!backend) try { backend = new IdbBackend(); } catch { backend = new MemoryBackend(); }
   const store = new NotesStore(backend); let cur = null, curKey = null, rangeFrom = null;
   libs.onchange = () => paint(); $('#notesPanel').addEventListener('focusout', () => setTimeout(() => { if (pendingPaint) paint(); }, 0));
@@ -148,25 +149,37 @@ export function initNotes({ backend: given, player, lib, libs, h, fmt, toast, sh
     feedItems = shownRecs.map(r => { const t = keys.get(r.key); return { r, t, label: t ? t.title : r.key.replace(/^file:|^album:|#\d*$/g, '') }; });
     $('#noteCards').replaceChildren(...feedItems.map(({ r, t, label }) => feedItem(r, t, label))); $('#emptyNotes').hidden = feedItems.length > 0;
 
-    // playlists: one row each; open one to see (and play from) its tracks. Server playlists can be hidden, local ones deleted.
-    const hidden = new Set(lsGet('hiddenPlaylists', [])), all = await store.playlists(), pls = all.filter(p => showHidden || !hidden.has(p.id)), nHidden = all.filter(p => hidden.has(p.id)).length; if (!nHidden) showHidden = false;
+    await paintPlaylists();
+  }
+  // playlists: found by name or by what is in them, mine / from servers, sorted; each row says what is in it (top
+  // artists, size, length) and, when the search matched its tracks, which ones. Open one to see and play its tracks.
+  let plLimit = 100;
+  async function paintPlaylists() {
+    const hidden = new Set(lsGet('hiddenPlaylists', [])), all = await store.playlists(), nHidden = all.filter(p => hidden.has(p.id)).length; if (!nHidden) showHidden = false;
     $('#plHidden').hidden = !nHidden; $('#plHiddenN').textContent = nHidden; $('#plShowHidden').checked = showHidden;
-    $('#plList').replaceChildren(...pls.map(p => {
-      const ts = resolve(p), isOpen = open.has(p.id), dur = ts.reduce((s, t) => s + (t.duration || 0), 0), hid = hidden.has(p.id);
-      const toggle = () => { isOpen ? open.delete(p.id) : open.add(p.id); paintLists(); };
-      const del = h('button', { class: 'mini', onclick: () => { if (del.dataset.sure) store.deletePlaylist(p.id).then(paintLists); else { del.dataset.sure = '1'; del.textContent = 'really delete?'; setTimeout(() => { if (del.isConnected) { delete del.dataset.sure; del.textContent = 'delete'; } }, 4000); } } }, 'delete');
+    const q = $('#plSearch').value.trim(), source = $('#plSource').value, found = searchPlaylists(all.filter(p => showHidden || !hidden.has(p.id)), q, resolve, { source, sort: $('#plSort').value }), shown = found.slice(0, plLimit);
+    $('#plCount').textContent = q || source !== 'all' ? `${found.length.toLocaleString()} of ${all.length.toLocaleString()}` : `${all.length.toLocaleString()} playlists`;
+    $('#plList').replaceChildren(...shown.map(({ p, tracks: ts, hits, nameHit }) => {
+      const isOpen = open.has(p.id), hid = hidden.has(p.id), sum = summaryOf(ts), hit = new Set(hits);
+      const toggle = () => { isOpen ? open.delete(p.id) : open.add(p.id); paintPlaylists(); };
+      const del = h('button', { class: 'mini', onclick: () => { if (del.dataset.sure) store.deletePlaylist(p.id).then(paintPlaylists); else { del.dataset.sure = '1'; del.textContent = 'really delete?'; setTimeout(() => { if (del.isConnected) { delete del.dataset.sure; del.textContent = 'delete'; } }, 4000); } } }, 'delete');
       return h('div', { class: 'ncard pl' + (isOpen ? ' open' : '') + (hid ? ' hid' : ''), 'data-id': p.id },
         h('div', { class: 'nc-head' }, h('button', { class: 'pltoggle', 'aria-expanded': String(isOpen), title: isOpen ? 'Hide the tracks' : 'Show the tracks', onclick: toggle }, isOpen ? '▾' : '▸'), h('b', { class: 'plname', onclick: toggle }, p.name),
           p.server ? h('span', { class: 'chip', title: 'A copy of a playlist on your server, refreshed on every sync' }, '☁ server') : '', hid ? h('span', { class: 'chip' }, 'hidden') : '',
-          h('span', { class: 'muted' }, `${p.items.length} tracks${dur ? ' · ' + fmt(dur) : ''}${ts.length < p.items.length ? ` · ${p.items.length - ts.length} not in the library` : ''}`),
-          h('span', { class: 'facts2' }, h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'),
-            p.server ? h('button', { class: 'mini', title: hid ? 'Show it in this list again' : 'Hide it from this list (it stays on the server)', onclick: () => { hid ? hidden.delete(p.id) : hidden.add(p.id); lsSet('hiddenPlaylists', [...hidden]); paintLists(); } }, hid ? 'unhide' : 'hide') : del)),
-        isOpen ? h('ol', { class: 'pltracks' }, ...ts.map((t, i) => h('li', { title: 'Play from here', ondblclick: () => playNow(ts, i), onclick: () => playNow(ts, i) }, h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted mono small' }, t.duration ? fmt(t.duration) : '')))) : '');
-    }));
+          h('span', { class: 'muted' }, `${p.items.length.toLocaleString()} tracks${sum.duration ? ' · ' + fmt(sum.duration) : ''}${ts.length < p.items.length ? ` · ${p.items.length - ts.length} not in the library` : ''}`),
+          h('span', { class: 'facts2' }, h('button', { class: 'mini', onclick: () => playPlaylist(p) }, '▶ play'), offline()?.keepButton({ type: 'playlist', id: p.id, name: p.name }) || '', h('button', { class: 'mini', onclick: () => exportM3U(p) }, 'export M3U'),
+            p.server ? h('button', { class: 'mini', title: hid ? 'Show it in this list again' : 'Hide it from this list (it stays on the server)', onclick: () => { hid ? hidden.delete(p.id) : hidden.add(p.id); lsSet('hiddenPlaylists', [...hidden]); paintPlaylists(); } }, hid ? 'unhide' : 'hide') : del)),
+        h('div', { class: 'plsum muted small', onclick: toggle }, sum.artists || (p.items.length ? 'None of its tracks are in the library right now.' : 'Empty.')),
+        q && hits.length && !isOpen ? h('div', { class: 'plhits small', onclick: toggle }, h('b', {}, `${hits.length} matching: `), hits.slice(0, 4).map(t => `${t.title}${t.artist ? ' — ' + t.artist : ''}`).join(' · ') + (hits.length > 4 ? ' …' : '')) : '',
+        isOpen ? h('ol', { class: 'pltracks' }, ...ts.map((t, i) => h('li', { class: q && hit.has(t) ? 'hit' : '', title: 'Play from here', ondblclick: () => playNow(ts, i), onclick: () => playNow(ts, i) }, h('span', { class: 'tt' }, t.title), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted mono small' }, t.duration ? fmt(t.duration) : '')))) : '');
+    }), found.length > shown.length ? h('button', { class: 'btn', onclick: () => { plLimit += 100; paintPlaylists(); } }, `Show more (${(found.length - shown.length).toLocaleString()} left)`) : '',
+      all.length && !found.length ? h('div', { class: 'empty' }, q ? `No playlist has “${q}” in its name or its tracks.` : 'No playlists here.') : '');
     $('#emptyPl').hidden = all.length > 0;
   }
   $('#noteCards').addEventListener('focusout', () => setTimeout(() => { if (listsPending) paintLists(); }, 0)); $('#plList').addEventListener('focusout', () => setTimeout(() => { if (listsPending) paintLists(); }, 0));
-  $('#plShowHidden').onchange = e => { showHidden = e.target.checked; paintLists(); };
+  $('#plShowHidden').onchange = e => { showHidden = e.target.checked; paintPlaylists(); };
+  { let tmr = 0; $('#plSearch').oninput = () => { clearTimeout(tmr); tmr = setTimeout(() => { plLimit = 100; paintPlaylists(); }, 150); }; }
+  $('#plSource').onchange = () => { plLimit = 100; paintPlaylists(); }; $('#plSort').onchange = paintPlaylists;
   $('#feedShare').onclick = () => {
     const md = feedMarkdown(feedItems.map(({ r, t, label }) => ({ track: { title: label, artist: t?.artist || '' }, rating: r.rating, tags: r.tags, notes: [...r.notes].sort((a, b) => (a.at ?? -1) - (b.at ?? -1)) })), shareOpts());
     const dlg = h('dialog', { class: 'tagdlg sharedlg', 'aria-label': 'Share the feed' }), ta = h('textarea', { rows: 14, class: 'sharetext' }), close = () => { dlg.close(); dlg.remove(); }; ta.value = md;

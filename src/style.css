@@ -276,3 +276,17 @@ textarea { width: 100%; box-sizing: border-box; background: #0f1320; color: var(
 .mdcands { display: grid; gap: 8px; width: 100%; } .mdcand { display: flex; gap: 10px; align-items: center; padding: 6px; border-radius: 8px; background: var(--panel2, #ffffff08); }
 .mdcand .cover { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; flex: none; }
 .tagdlg input.suggested { outline: 1px solid var(--accent); }
+
+/* Settings → Offline */
+.off-box { display: flex; flex-direction: column; } .off-box .dv-space { margin: -2px 0 8px; }
+.srow.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.off-rules { display: flex; flex-direction: column; gap: 4px; }
+.off-rule { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; } .off-rule .grow { flex: 1; }
+.off-prog { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.mini.on { color: var(--accent); border-color: #3a4590; }
+/* Playlists: find by name or contents */
+.plfind { gap: 8px; } .plfind #plSearch { flex: 1; min-width: 220px; }
+.plsum { cursor: pointer; padding-left: 30px; margin-top: -4px; } .plhits { cursor: pointer; padding-left: 30px; color: var(--ink); } .plhits b { color: var(--accent); font-weight: 600; }
+.pltracks li.hit { background: #1d2342; } .pltracks li.hit .tt { color: var(--accent); }
+.dv-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; max-width: 640px; } .dv-plres { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
+.dv-plhit { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 6px; } .dv-plhit:hover { background: var(--panel2); } .dv-plhit .chip { margin-left: 6px; }

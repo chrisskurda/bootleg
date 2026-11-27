@@ -22,6 +22,12 @@
 //     async setRating(session, itemId, stars)          // optional, whole stars 0–5: bootleg ratings sync both ways
 //     async setStarred(session, itemId, on)            // optional: the server's favourite/star ↔ the bootleg tag "starred"
 //     async rescan(session)                            // optional: ask the server to re-read its files (after bootleg wrote tags)
+//     offline: true                                      // optional: the service allows keeping copies on this computer (offline
+//                                                         //   store, device sync). Leave it out when its terms forbid that (DRM'd
+//                                                         //   or streaming-only services): their tracks are then never stored.
+//     download(session, item, quality) → { url, ext, quality, headers?, bytes? }   // with offline: where to fetch a copy.
+//                                                         //   quality: 'original' | 'high' | 'saver' (MP3 320 / 128 when the service
+//                                                         //   can convert); return what you will actually send (`quality`, `ext`).
 //   }
 //   Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate, rating?, starred?, path? }
 //     `path`: the file's real path inside the server's music folder, when the server reports it (used to write tag edits to files)

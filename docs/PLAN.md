@@ -51,7 +51,7 @@ Later: Subsonic source, source/stem-format plugin interface, spectrum over postM
 ## Desktop platforms
 - **macOS (arm64):** `npx tauri build` → `src-tauri/target/release/bundle/macos/bootleg.app`; verified with the headless self-test.
 - **Linux (arm64 container, WebKitGTK):** `scripts/linux/test.sh` builds in Docker and runs the self-test under Xvfb — passes. WebKitGTK can't stream from `asset://`, so the player falls back to a blob URL when the media element rejects it. Not yet tried: x86_64 Linux, packaging (.deb/AppImage), real audio output.
-- **Android:** later (Tauri 2 mobile); needs a different file-access model (SAF) — the source plugin interface should keep that in mind.
+- **Android / iOS:** see *Mobile (Android, iOS)* below.
 
 ## Scanning, cache and .nfo (v0.2)
 - **Import progress:** folder scans report files/folders found (8 parallel readers); tag reading shows "N of M" with a bar.
@@ -103,6 +103,10 @@ Decided 2026-11-26. Sync the library to portable players: USB-storage players, S
 - **Order:** bootleg-pod's `bootleg-sync` crate and CLI first, then the desktop sync view on top of it, then the Rockbox play-count import, then two-way notes with pod devices.
 - **Built (unreleased):** `vendor/bootleg-sync` (git subtree from bootleg-pod's `crates/bootleg-sync`; change it there and `git subtree pull --prefix=vendor/bootleg-sync <bootleg-pod> <split branch> --squash`), `src-tauri/src/devices.rs` (commands), `src/lib/devices.js` (selection → files, outbox merge; `tests/devices.test.mjs`), `src/lib/devices-ui.js` (the Devices page), and a `deviceSync` step in the desktop self-test. The card's selection (`playlists`, `[select] min_rating / starred`) lives in its `device.toml`, so it travels with the card. Next: transcoding (the core `Transcode`), USB vendor/product ids for players without bootleg-pod, `.bstem` packages as mix + metadata, Windows free space.
 
+### Offline store (built, unreleased)
+Server tracks (and files on network shares) kept on this computer by rules: playlists, albums, tracks, rating, starred, in priority order, with a space limit and a quality (original, or MP3 320 / 128 converted by a Subsonic server). Optional "also keep what I play" (off by default, own limit). Device sync gets server tracks through it (kept by default; "temporary only" is a setting), at the card's own quality. Files: `src-tauri/src/offline.rs` (downloads, copies, index), `src/lib/offline.js` (rules and planning, `tests/offline.test.mjs`), `src/lib/offline-ui.js` (Settings → Offline, ⤓ buttons), `src/lib/offline-hook.js` (sources play the kept copy). Plugins opt in with `offline: true` + `download()`.
+Next: per-library default rules; showing ⤓ state on tracks in lists; a stem-server "convert" endpoint so stem sets can be kept smaller; local transcoding for files on shares (needs the core `Transcode`).
+
 ### Roadmap: iPod plugin (experimental, no guarantees)
 A separate plugin, not part of the supported player sync and not in the default build. Needs plugin spec 2.1 (helper processes, `stability: experimental`).
 - **Scope:** click-wheel iPods only. iPods running Rockbox use the built-in `rockbox` handler instead.
@@ -110,3 +114,17 @@ A separate plugin, not part of the supported player sync and not in the default 
 - **Models, in order:** no-checksum generations (1G–5.5G, mini, nano 1G–2G, shuffles) → classic 6G/7G and nano 3G–4G (hash58, through libgpod) → maybe nano 5G (needs a key from an earlier iTunes sync). nano 6G/7G and iPod touch are refused when detected.
 - **Safety:** back up the database into `.bootleg/backup/` before every write; refuse unknown database versions; warn when the Music app on a Mac is set to sync the iPod automatically; Linux writes only to FAT-formatted iPods (HFS+ write support is unreliable there).
 - **Not before:** the supported player sync has shipped and spec 2.1 is implemented.
+
+## Mobile (Android, iOS)
+Planned 2026-11-26, nothing built. Phones and tablets could run everything the desktop does, but much of it isn't practical there, so mobile is a **profile of this codebase** (Tauri 2 mobile, same JS UI, plugins and Rust core), not a new app and not bootleg-pod. Pod stays the lean player for Linux handhelds and weak devices.
+- **What mobile is:** a client of the music server (192.168.1.26) plus an **offline subset** stored on the phone. Heavy work (transcoding, analysis, stem renders, imports, converters) stays on the server or desktop. Responsive touch layout; tablets may keep the compose/studio views, phones are view-and-play.
+- **Left out:** the CD plugin (`plugin-cd` off for mobile targets), USB device sync (possible on Android over OTG with SAF, impossible on iOS; not worth it at first), `tauri-plugin-single-instance` (desktop only), anything that depends on `tiny_http` staying alive in the background.
+- **Background audio (the main problem):** webview audio stops when the app is backgrounded, iOS most of all, and Web Audio stem mixing won't keep running. A music player needs native playback: Android MediaSession + foreground service, iOS AVAudioSession, lock-screen and headset controls, audio focus. Plan: a native Rust audio engine (decode + mix + output, cpal/oboe) behind a Tauri mobile plugin, the UI only controls it. bootleg-pod's `pod-core` audio engine is meant to be the same engine. Decide this before any other mobile work.
+- **Storage:** Android uses SAF (document trees, no real paths); iOS keeps everything in the app sandbox, document pickers for anything outside. Source and stem-format plugins must not assume file paths.
+- **The phone as a sync target:** the device format already works on any folder, so the app's own storage gets a `.bootleg/device.toml` and is paired like any medium. What's new is a **network transport**: the desktop or server sends the same plan over the LAN and the phone applies it with `bootleg-sync`; outbox events (plays, ratings, notes, tags) come back the same way.
+- **Plugins:** JS plugins run unchanged. Native plugins are compiled per target (NDK, iOS). Spec 2.1 helper processes (§9.1) can't run on iOS, and on Android only from binaries shipped in the APK's native library folder. The spec needs a `platforms` field in `plugin.json` so a plugin declares where it works and the host hides the rest.
+- **Should build as is:** `lofty`, `ureq`, `bootleg-sync` (statvfs); the dialog, fs and http plugins work but behave differently on mobile.
+- **Distribution:** Android is an APK (sideload; F-Droid or Play later). iOS needs signing: free personal signing expires after 7 days, TestFlight or ad-hoc installs need the paid developer account. App Store rule 2.5.2 limits downloaded code that changes behaviour, which conflicts with installable plugins, so a public App Store build would ship with plugins locked to a bundled set.
+- **Order:** (1) native audio engine shared with pod, (2) Android build of the mobile profile with server streaming, (3) phone as a network sync target with the offline subset, (4) iOS for personal installs only, until the audio engine and plugin story are proven.
+- **Test devices:** the Android range already listed in bootleg-pod's plan (Snapdragon 600-series to ~Gen 1).
+- **Open:** whether bootleg-pod keeps an Android shell at all (see its plan), and whether tablets get the full studio views.

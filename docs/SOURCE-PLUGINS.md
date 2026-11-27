@@ -19,6 +19,9 @@ export const myService = {
   setRating(session, itemId, stars),           // optional: whole stars 0–5; bootleg ratings then sync both ways
   setStarred(session, itemId, on),             // optional: the server's star/favourite ↔ the bootleg tag "starred"
   halfStars: true,                             // optional: the service keeps half stars (setRating gets 3.5; otherwise whole stars)
+  offline: true,                               // optional: the service's terms allow keeping copies (Settings → Offline, device sync)
+  download(session, item, quality) → { url, ext, quality, headers?, bytes? },   // with offline: where to fetch a copy;
+                                               //   quality 'original' | 'high' | 'saver' — return what you will really send
 };
 // Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate }
 //   or a file item: { id, kind: 'file', rel: '<song>/stems/kick.flac', size, changed, text?, song? }
@@ -36,6 +39,10 @@ Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's 
 - Items become library tracks that arrive **already tagged** (nothing is read from files), listed, searched, sorted, queued, rated, noted, tagged, put in playlists and shown to the visualizer like any other track.
 - The track list is **cached** (IndexedDB) so the library appears instantly — and offline — on the next start; it is then **re-scanned incrementally in the background** (new items appear, items the service no longer has disappear), on startup / every N minutes / on demand.
 - Annotations are keyed by `plugin:connection/itemId`, so they survive restarts and re-scans.
+- **Offline copies** (`offline: true` + `download()`): your tracks can be kept on the computer by the user's rules
+  (Settings → Offline) and copied to device cards; playback then uses the copy. Leave `offline` out when the service's
+  terms forbid copies — its tracks are then never stored. Subsonic asks the server to convert for *High* / *Space saver*
+  (`stream?format=mp3&maxBitRate=…`) and uses `download` for originals; the stem server sends its files as they are.
 - A library can mix folders and any number of connections. Libraries have modes (listening / studio).
 
 ## Rules of thumb

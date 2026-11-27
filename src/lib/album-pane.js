@@ -9,7 +9,7 @@ const drafts = new Map();     // unsent note text survives the pane repainting a
 const SRC_LABEL = { tags: 'tags', nfo: '.nfo', server: 'server', files: 'files', library: 'library', bootleg: 'bootleg' };
 
 // `meta`: metadata providers ({ providers(), chosen: Chosen, lookup(query), open(url), repaint() }), or null.
-export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, cover, trackStore, editTags = null, meta = null, acts = { now: (l, i = 0) => player.playList(l, i), activate: (l, i = 0) => player.playList(l, i) } }) {
+export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, cover, trackStore, editTags = null, meta = null, offline = null, acts = { now: (l, i = 0) => player.playList(l, i), activate: (l, i = 0) => player.playList(l, i) } }) {
   const key = albumKey(a), rec = await store.get(key), mode = MODES[libs.modeOf(a.tracks[0])] || MODES.listening;
   const chosen = meta ? await meta.chosen.get(key) : null;
   const { facts, text } = albumFacts(a, { libraryName: id => libs.get(id)?.name || '', extra: extraFacts(chosen) });
@@ -23,7 +23,7 @@ export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, co
   return h('div', { class: 'apane' },
     h('div', { class: 'ahead' }, cover(a.coverUrl || chosen?.cover, 'cover xl'), h('div', { class: 'agrow' }, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, facts.find(f => f.label === 'Year')?.value, plural(a.tracks.length, 'track'), a.tracks.some(t => t.duration) ? hms(a.tracks.reduce((n, t) => n + (t.duration || 0), 0)) : ''].filter(Boolean).join(' · ')),
       h('div', { class: 'arate' }, stars(h, rec.rating, v => store.setRating(key, v)), mode.status ? h('select', { 'aria-label': 'Status', onchange: e => store.setStatus(key, e.target.value) }, h('option', { value: '' }, 'status…'), ...STATUSES.map(x => h('option', { value: x, selected: x === rec.status }, x))) : ''),
-      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play'), h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'), editTags ? h('button', { class: 'btn', onclick: () => editTags(a.tracks, `Edit album — ${a.album}`, tagSuggestion(chosen)) }, '✎ Edit album') : ''))),
+      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play'), h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'), offline ? offline.keepButton({ type: 'album', key: a.key, name: a.album }, 'btn') : '', editTags ? h('button', { class: 'btn', onclick: () => editTags(a.tracks, `Edit album — ${a.album}`, tagSuggestion(chosen)) }, '✎ Edit album') : ''))),
     h('h4', {}, 'Details ', h('span', { class: 'muted small' }, 'merged from everything we know — the chip says where each fact came from')),
     meta && (chosen || meta.providers().length) ? lookupRow(a, key, chosen, meta, h) : '',
     h('dl', { class: 'facts' }, ...facts.flatMap(f => [h('dt', {}, f.label), h('dd', {}, h('span', {}, f.value), h('span', { class: 'chip src' }, SRC_LABEL[f.source] || f.source))])),
@@ -35,7 +35,7 @@ export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, co
     h('h4', {}, 'Tracks'),
     h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), ondblclick: () => acts.activate(a.tracks, i, true) },
       h('span', { class: 'n' }, String(t.track || i + 1)), h('span', { class: 'tt' }, t.title, rated[i].rating ? h('span', { class: 'mini-stars' }, ' ' + '★'.repeat(Math.floor(rated[i].rating)) + (rated[i].rating % 1 ? '½' : '')) : ''), h('span', { class: 'muted' }, t.artist && t.artist !== a.artist ? t.artist : ''), h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''),
-      h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue'))))));
+      h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue'), offline ? offline.trackButton(t) : '')))));
 }
 
 // "Find details online": ask the metadata providers, let the user pick the right release, remember it for this album.

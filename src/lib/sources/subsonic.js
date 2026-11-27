@@ -52,6 +52,14 @@ export const subsonic = {
   setStarred: (ses, id, on) => call(ses, on ? 'star' : 'unstar', { id }),
   rescan: ses => call(ses, 'startScan'),                                              // after bootleg wrote tags into the server's files
   streamUrl: (ses, it) => url(ses, 'stream', { id: it.id, format: 'raw' }),
+  // offline copies (src/lib/offline.js): the original file, or converted by the server (its transcoding settings decide
+  // what it can do; a server that can't convert sends the original, which is then kept as that)
+  offline: true,
+  download: (ses, it, quality) => {
+    const kbps = { high: 320, saver: 128 }[quality];
+    if (!kbps || (String(it.suffix).toLowerCase() === 'mp3' && it.bitrate && it.bitrate <= kbps)) return { url: url(ses, 'download', { id: it.id }), ext: it.suffix || 'mp3', quality: 'original' };
+    return { url: url(ses, 'stream', { id: it.id, format: 'mp3', maxBitRate: kbps }), ext: 'mp3', quality, bytes: (it.duration || 0) * kbps * 125 };
+  },
   coverUrl: (ses, it, px = 512) => it.coverId ? url(ses, 'getCoverArt', { id: it.coverId, size: px }) : '',
   fetch: (ses, u, init) => netFetch(u, init),
 };

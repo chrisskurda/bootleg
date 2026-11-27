@@ -12,40 +12,51 @@ const pad = n => String(n).padStart(2, '0');
 const clean = s => String(s || '').trim();
 
 /** Where a track goes under the card's managed folder: `Artist/Album/01 Title.ext` (disc > 1: `2-01 Title`). */
-export function relFor(t) {
-  const p = t.src?.path || '', x = ext(p);
+export function relFor(t, local = '') {
+  const p = t.src?.path || '', x = ext(local || p) || ext(t.src?.name);
   const artist = clean(t.albumArtist) || clean(t.artist), album = clean(t.album), title = clean(t.title);
-  if (!artist && !album) return 'Unsorted/' + base(p);
+  if (!artist && !album) return 'Unsorted/' + (t.src?.kind === 'remote' ? `${clean(title) || 'track'}.${x}` : base(p));
   const n = t.track ? (t.disc > 1 ? `${t.disc}-` : '') + pad(t.track) + ' ' : '';
   return `${artist || 'Unknown artist'}/${album || 'Unknown album'}/${n}${title || base(p).replace(/\.[^.]+$/, '')}.${x}`;
 }
 
 /**
- * Library items → files for `device_plan`: [{ track, path, rel }], plus what can't go and why.
- * `keyOf` is the app's track key (notes-ui.js trackKey). The first file of each item carries the item's own key, so
- * playlists and the player's plays and ratings point at it.
+ * Library items → files for `device_plan`: [{ track, path, rel }], plus what can't go and why, plus `remote`: server
+ * files that need a local copy first ([{ track, src, title }]). `localOf(src)` → a local copy's path (the offline store)
+ * or null. `keyOf` is the app's track key (notes-ui.js trackKey). The first file of each item carries the item's own
+ * key, so playlists and the player's plays and ratings point at it.
  */
-export function filesFor(tracks, { keyOf, stems = false }) {
-  const files = [], skipped = [], seen = new Set();
+export function filesFor(tracks, { keyOf, stems = false, localOf = () => null }) {
+  const files = [], skipped = [], remote = [], seen = new Set();
   const add = (track, path, rel) => { if (!seen.has(track)) { seen.add(track); files.push({ track, path, rel }); } };
+  // a remote file goes in when it has a local copy; otherwise it is listed to fetch
+  const want = (owner, k, src, rel, title) => {
+    if (src.kind !== 'remote') return add(k, src.path, rel);
+    const p = localOf(src); if (p) return add(k, p, rel);
+    if (!remote.some(r => r.src.path === src.path)) remote.push({ track: owner, src, title });
+  };
   for (const t of tracks) {
     const key = keyOf(t);
-    if (t.src?.kind === 'remote') { skipped.push({ track: key, title: t.title, why: 'on a server, not on this computer' }); continue; }
     if (t.kind === 'render') {
       if (t.pkgSrc) { skipped.push({ track: key, title: t.title, why: 'stem packages (.bstem / .bsong) are not synced yet' }); continue; }
       const folder = `Stem sets/${clean(t.artist) ? clean(t.artist) + ' - ' : ''}${clean(t.title) || base(t.dir)}`;
       if (!t.mix?.path) { skipped.push({ track: key, title: t.title, why: 'no mix file (render one, or turn on stems for this card)' }); if (!stems) continue; }
-      else add(key, t.mix.path, `${folder}/mix.${ext(t.mix.path)}`);
-      const metaDir = t.manifestSrc?.path ? dir(t.manifestSrc.path) : t.dir;
-      for (const f of META_FILES) if (t.manifestSrc?.path && dir(t.manifestSrc.path) === metaDir) add(`${key}|${f}`, `${metaDir}/${f}`, `${folder}/${f}`);
-      if (t.coverSrc?.path) add(`${key}|cover`, t.coverSrc.path, `${folder}/${base(t.coverSrc.path)}`);
-      if (stems) for (const s of t.stems || []) if (s.src?.path) add(`${key}|stem:${s.name}`, s.src.path, `${folder}/stems/${base(s.src.path)}`);
+      else want(key, key, t.mix, `${folder}/mix.${ext(t.mix.name || t.mix.path)}`, t.title);
+      if (t.mix?.kind === 'remote' || t.manifestSrc?.kind === 'remote') {         // a stem server song: its files are separate items
+        for (const [src, name] of [[t.manifestSrc, 'manifest.json'], [t.clipsSrc, 'clips.json'], [t.coverSrc, base(t.coverSrc?.name || t.coverSrc?.path || '')]]) if (src) want(key, `${key}|${name}`, src, `${folder}/${name}`, t.title);
+      } else {
+        const metaDir = t.manifestSrc?.path ? dir(t.manifestSrc.path) : t.dir;
+        for (const f of META_FILES) if (t.manifestSrc?.path && dir(t.manifestSrc.path) === metaDir) add(`${key}|${f}`, `${metaDir}/${f}`, `${folder}/${f}`);
+        if (t.coverSrc?.path) add(`${key}|cover`, t.coverSrc.path, `${folder}/${base(t.coverSrc.path)}`);
+      }
+      if (stems) for (const s of t.stems || []) if (s.src?.path) want(key, `${key}|stem:${s.name}`, s.src, `${folder}/stems/${base(s.src.name || s.src.path)}`, t.title);
       continue;
     }
     if (!t.src?.path) { skipped.push({ track: key, title: t.title, why: 'not a file' }); continue; }
+    if (t.src.kind === 'remote') { const p = localOf(t.src); if (p) add(key, p, relFor(t, p)); else remote.push({ track: key, src: t.src, title: t.title }); continue; }
     add(key, t.src.path, relFor(t));
   }
-  return { files, skipped };
+  return { files, skipped, remote };
 }
 
 /**
@@ -55,11 +66,16 @@ export function filesFor(tracks, { keyOf, stems = false }) {
  * `records`: notes records ({ key, rating, tags }).
  */
 export function selectionFor(medium, { playlists, byKey, records = [] }) {
-  const out = [], have = new Set(), onCard = [];
+  const out = [], have = new Set(), onCard = [], missing = [];
   const take = t => { if (t && !have.has(t.id)) { have.add(t.id); out.push(t); } };
   for (const name of medium.playlists || []) {
-    const pl = playlists.find(p => p.name === name); if (!pl) continue;
-    const items = pl.items.map(k => byKey.get(typeof k === 'string' ? k : k?.key)).filter(Boolean);
+    const pl = playlists.find(p => p.name === name);
+    if (!pl) { missing.push({ track: name, title: `Playlist “${name}”`, why: 'no playlist with this name any more (renamed or deleted?)' }); continue; }
+    const items = [];
+    for (const k of pl.items) {
+      const key = typeof k === 'string' ? k : k?.key, t = byKey.get(key);
+      if (t) items.push(t); else missing.push({ track: key, title: titleOfKey(key), why: `in “${name}” but not in the library that’s open (try All libraries)` });
+    }
     items.forEach(take); onCard.push({ name, items });
   }
   const sel = medium.select || {}, min = +sel.min_rating || 0;
@@ -68,8 +84,13 @@ export function selectionFor(medium, { playlists, byKey, records = [] }) {
       if ((min && r.rating >= min) || (sel.starred && (r.tags || []).includes('starred'))) take(byKey.get(r.key));
     }
   }
-  return { tracks: out, playlists: onCard };
+  return { tracks: out, playlists: onCard, missing };
 }
+
+/** Whether a card has anything chosen at all (playlists, a rating floor or starred). */
+export const hasSelection = m => !!((m.playlists || []).length || +m.select?.min_rating || m.select?.starred);
+
+const titleOfKey = k => { const p = String(k || '').replace(/^(file|render):/, '').replace(/#\d+$/, ''); return p.split('/').filter(Boolean).pop() || String(k); };
 
 /**
  * Merge a card's outbox (plays, ratings, notes, tags made on a player) into the notes store.

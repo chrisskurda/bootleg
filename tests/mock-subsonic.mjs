@@ -1,4 +1,4 @@
-// A tiny Subsonic-compatible server for tests: token auth, getAlbumList2/getAlbum/stream/getCoverArt, playlists,
+// A tiny Subsonic-compatible server for tests: token auth, getAlbumList2/getAlbum/stream/download/getCoverArt, playlists,
 // setRating/star/unstar (kept on the song objects, so getAlbum reports them back), CORS open.
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs';
 export function startMock({ user = 'alice', password = 'secret', songs, files, cover, playlists = [], port = 0 }) {
@@ -21,7 +21,7 @@ export function startMock({ user = 'alice', password = 'secret', songs, files, c
       if (m === 'setRating') { if (+q.get('rating')) s.userRating = +q.get('rating'); else delete s.userRating; } else if (m === 'star') s.starred = '2026-11-25T00:00:00Z'; else delete s.starred; return json({});
     }
     if (m === 'stream' && state.failStream) { res.writeHead(500); return res.end('boom'); }
-    if (m === 'stream') { const s = state.songs.find(x => x.id === q.get('id')); if (!s) { res.writeHead(404); return res.end(); } const buf = fs.readFileSync(files[s.id]); const range = req.headers.range; res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('content-type', 'audio/' + (s.suffix === 'flac' ? 'flac' : 'mpeg'));
+    if (m === 'stream' || m === 'download') { const s = state.songs.find(x => x.id === q.get('id')); if (!s) { res.writeHead(404); return res.end(); } const buf = fs.readFileSync(files[s.id]); const range = req.headers.range; res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('content-type', 'audio/' + (s.suffix === 'flac' ? 'flac' : 'mpeg'));
       if (range) { const [a, b] = range.replace('bytes=', '').split('-'), start = +a, end = b ? +b : buf.length - 1; res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${buf.length}`, 'Content-Length': end - start + 1 }); return res.end(buf.subarray(start, end + 1)); } res.setHeader('Content-Length', buf.length); return res.end(buf); }
     if (m === 'getCoverArt') { res.setHeader('content-type', 'image/png'); return res.end(fs.readFileSync(cover)); }
     res.writeHead(404); res.end();
