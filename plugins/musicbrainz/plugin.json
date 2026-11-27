@@ -1,0 +1,15 @@
+{
+  "spec": "2.0",
+  "id": "musicbrainz",
+  "name": "MusicBrainz",
+  "version": "0.1.0",
+  "description": "Looks albums up on MusicBrainz when you ask (Find details online… in the album pane): release date, label, catalogue number, barcode, release type, genres and the cover from the Cover Art Archive, and fills in tags from the release you pick.",
+  "entry": "index.js",
+  "provides": ["metadata"],
+  "platforms": {
+    "macos":   { "status": "experimental" },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "experimental" }
+  }
+}

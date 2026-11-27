@@ -1,0 +1,19 @@
+{
+  "spec": "2.0",
+  "id": "acoustid",
+  "name": "AcoustID",
+  "version": "0.1.0",
+  "description": "Identifies albums by their sound when the tags don't say enough: each track's audio fingerprint is looked up on AcoustID, and the MusicBrainz releases holding the most of the album's tracks are offered in the album pane (Find details online…).",
+  "entry": "index.js",
+  "provides": ["metadata"],
+  "settings": [
+    { "key": "apiKey", "label": "AcoustID API key", "type": "secret", "hint": "Register an application at acoustid.org (free, with a MusicBrainz account) and paste its key, until bootleg has one of its own." }
+  ],
+  "platforms": {
+    "macos":   { "status": "experimental", "arch": ["aarch64", "x86_64"] },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "unavailable", "why": "Fingerprinting reads the files, which a browser can't do." }
+  },
+  "native": { "crate": "native", "feature": "plugin-acoustid" }
+}

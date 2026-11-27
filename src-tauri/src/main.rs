@@ -9,6 +9,7 @@
 
 use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 mod devices;
+mod secrets;
 mod dlna;
 mod scan;
 mod tags;
@@ -187,6 +188,9 @@ fn selftest_done(app: AppHandle, result: String) {
 fn plugin_runtime() -> serde_json::Value {
     #[allow(unused_mut)] let mut native: Vec<&str> = vec![];
     #[cfg(feature = "plugin-cd")] native.push("cd");
+    #[cfg(feature = "plugin-checker")] native.push("checker");
+    #[cfg(feature = "plugin-acoustid")] native.push("acoustid");
+    #[cfg(feature = "plugin-capture")] native.push("capture");
     serde_json::json!({ "spec": bootleg_plugin_api::SPEC, "os": env::consts::OS, "arch": env::consts::ARCH, "native": native })
 }
 /// Cancel a native plugin's job (§5.3).
@@ -206,12 +210,18 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init());
     #[cfg(feature = "plugin-cd")] { builder = builder.plugin(bootleg_plugin_cd::init()); }
+    #[cfg(feature = "plugin-checker")] { builder = builder.plugin(bootleg_plugin_checker::init()); }
+    #[cfg(feature = "plugin-acoustid")] { builder = builder.plugin(bootleg_plugin_acoustid::init()); }
+    #[cfg(feature = "plugin-capture")] { builder = builder.plugin(bootleg_plugin_capture::init()); }
     builder
-        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, plugin_runtime, plugin_job_cancel, devices::devices_list, devices::device_pair, devices::device_unpair, devices::device_settings, devices::device_plan, devices::device_apply, devices::device_cancel, devices::device_outbox, devices::device_outbox_ack, devices::device_write_notes])
+        .invoke_handler(tauri::generate_handler![allow_path, scan_dir, read_tags_batch, write_tags, screens_list, screen_open, screen_close, open_external, mini_open, mini_close, mini_on_top, main_show, selftest_minimize, lan_share, lan_share_bytes, lan_mime, dlna_discover, dlna_add, dlna_play, dlna_transport, dlna_seek, dlna_volume, dlna_status, take_opened, selftest_config, selftest_subsonic, selftest_dlna, selftest_done, plugin_runtime, plugin_job_cancel, devices::devices_list, devices::device_pair, devices::device_unpair, devices::device_settings, devices::device_plan, devices::device_apply, devices::device_cancel, devices::device_outbox, devices::device_outbox_ack, devices::device_write_notes, secrets::secret_status, secrets::secret_get, secrets::secret_set, secrets::secret_delete])
         .on_window_event(main_window_event)
         .setup(move |app| {
             // Native plugins' permissions, for the player window only, and only for those compiled into this build (§5.4)
             #[cfg(feature = "plugin-cd")] app.add_capability(r#"{ "identifier": "plugin-cd", "windows": ["main"], "permissions": ["bootleg-cd:default"] }"#)?;
+            #[cfg(feature = "plugin-checker")] app.add_capability(r#"{ "identifier": "plugin-checker", "windows": ["main"], "permissions": ["bootleg-checker:default"] }"#)?;
+            #[cfg(feature = "plugin-acoustid")] app.add_capability(r#"{ "identifier": "plugin-acoustid", "windows": ["main"], "permissions": ["bootleg-acoustid:default"] }"#)?;
+            #[cfg(feature = "plugin-capture")] app.add_capability(r#"{ "identifier": "plugin-capture", "windows": ["main"], "permissions": ["bootleg-capture:default"] }"#)?;
             // Self-test runs with a flag injected into the page so it never touches the user's real settings, library or notes.
             let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::default()).title("bootleg").inner_size(1360.0, 860.0).min_inner_size(900.0, 600.0);
             if env::var("BOOTLEG_SELFTEST").is_ok() { b = b.initialization_script("window.__BOOTLEG_SELFTEST = true;"); }

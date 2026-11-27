@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Everything the library checker's page needs: check files, cancel, forget cached results."
+permissions = ["allow-check", "allow-cancel", "allow-forget", "allow-info"]

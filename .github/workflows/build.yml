@@ -53,7 +53,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev xvfb dbus-x11 ffmpeg \
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev xvfb dbus-x11 ffmpeg \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
       - name: macOS packages
         if: runner.os == 'macOS'
@@ -66,6 +66,14 @@ jobs:
         run: npx tauri build --bundles ${{ matrix.bundles }}
       - name: Native plugin tests (CD engine against its simulator; every OS must compile — plugin spec §5.2)
         run: cargo test --manifest-path plugins/cd/native/Cargo.toml
+      - name: Library checker tests (decoding, spectrum, AccurateRip on generated files; the ffmpeg-made fakes where ffmpeg is installed)
+        run: cargo test --manifest-path plugins/checker/native/Cargo.toml
+      - name: Capture tests (click removal, track splits, a whole side recorded from the simulated input and saved)
+        run: cargo test --manifest-path plugins/capture/native/Cargo.toml
+      - name: AcoustID fingerprint tests
+        run: cargo test --manifest-path plugins/acoustid/native/Cargo.toml
+      - name: Plugin API tests (jobs, secrets)
+        run: cargo test --manifest-path src-tauri/plugin-api/Cargo.toml
       - name: Self-test the built app (scan, tags, playback, stems, cache, notes, Subsonic)
         shell: bash
         continue-on-error: ${{ runner.os == 'Windows' }}      # new on Windows: reported, not yet blocking a release

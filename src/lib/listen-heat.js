@@ -7,8 +7,8 @@ export const BINS = 120;
 
 export class MapKV { constructor() { this.m = new Map(); } async get(s, k) { return this.m.get(s + '|' + k); } async put(s, k, v) { this.m.set(s + '|' + k, v); } async keys(s) { return [...this.m.keys()].filter(k => k.startsWith(s + '|')).map(k => k.slice(s.length + 1)); } async del(s, k) { this.m.delete(s + '|' + k); } }
 export class IdbKV {
-  constructor(name = 'bootleg-now') {
-    this.db = new Promise((ok, bad) => { const r = indexedDB.open(name, 1); r.onupgradeneeded = () => { for (const s of ['heat', 'spectro']) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s); }; r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); });
+  constructor(name = 'bootleg-now', stores = ['heat', 'spectro']) {
+    this.db = new Promise((ok, bad) => { const r = indexedDB.open(name, 1); r.onupgradeneeded = () => { for (const s of stores) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s); }; r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); });
   }
   async _do(s, mode, fn) { const db = await this.db; return new Promise((ok, bad) => { const tx = db.transaction(s, mode), req = fn(tx.objectStore(s)); tx.oncomplete = () => ok(req?.result); tx.onerror = () => bad(tx.error); }); }
   get(s, k) { return this._do(s, 'readonly', st => st.get(k)); }

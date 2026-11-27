@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Everything the Record page needs: list inputs, record, finish or cancel, analyse a recording, save tracks, discard a recording."
+permissions = ["allow-devices", "allow-record", "allow-finish", "allow-cancel", "allow-analyze", "allow-save", "allow-discard", "allow-recordings", "allow-backend-info"]

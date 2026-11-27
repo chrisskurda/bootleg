@@ -90,6 +90,8 @@ Damage that can't be fixed doesn't stop the rip. Instead:
 - **Fixing it later:** if a later re-rip or repair verifies a track, its defects are cleared and its file is replaced. If the user replaces a track from another source (another copy of the CD, a download), they can mark it as such: the defects are cleared and provenance notes where the replacement came from.
 
 ## Checking rips already in the library
+> Built as its own plugin: [CHECKER.md](CHECKER.md) (file integrity, FLAC MD5, fake lossless, AccurateRip without the disc). Rip logs, `.cue` sheets, CTDB and glitch detection below are still to do.
+
 The checker works on files without a drive. Run it on an album, a selection or the whole library (in the background, as an incremental job). What it finds goes into the existing annotations:
 - tags: `rip:verified`, `rip:suspect`, `rip:damaged`, `rip:fake-lossless`, `rip:truncated`
 - a note explaining each finding

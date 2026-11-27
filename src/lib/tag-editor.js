@@ -8,7 +8,8 @@ const ALBUM_FIELDS = ['album', 'albumArtist', 'artist', 'year', 'genre'];
 const shown = v => (v == null || v === 0 ? '' : String(v));
 const coerce = (k, v) => (k === 'track' || k === 'disc' ? (parseInt(v, 10) || 0) : v.trim());
 
-export function openTagEditor(tracks, { h, store, keyOf, toast, title }) {
+// `suggest`: { from, fields } from a metadata provider (album-wide fields): a button fills them in, to review before saving.
+export function openTagEditor(tracks, { h, store, keyOf, toast, title, suggest = null }) {
   tracks = tracks.filter(t => t && t.kind === 'track'); if (!tracks.length) return;
   const many = tracks.length > 1, fields = many ? ALBUM_FIELDS : EDIT_FIELDS, remote = tracks.some(t => t.remote);
   const source = (t, k) => shown(t.orig ? t.orig[k] : t[k]);                                 // what the file / server says
@@ -38,6 +39,7 @@ export function openTagEditor(tracks, { h, store, keyOf, toast, title }) {
   dlg.append(h('form', { method: 'dialog', onsubmit: e => { e.preventDefault(); save().catch(err => toast(String(err.message || err), true)); } },
     h('h3', {}, title || (many ? `Edit album — ${tracks.length} tracks` : 'Edit tags')),
     h('div', { class: 'muted small' }, `Saved in bootleg only: ${remote ? 'the server' : 'the file'} keeps its own tags. Edited fields are marked ✎ and can be reverted here.`),
+    suggest && rows.some(r => suggest.fields[r.k] != null) ? h('div', { class: 'cbtns' }, h('button', { type: 'button', class: 'btn', onclick: () => { for (const r of rows) { const v = suggest.fields[r.k]; if (v != null && v !== '') { r.input.value = String(v); r.input.classList.add('suggested'); } } } }, `Fill in from ${suggest.from}`), h('span', { class: 'muted small' }, 'then check and save')) : '',
     h('div', { class: 'tagfields' }, ...rows.map(r => r.el)),
     h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', type: 'submit' }, 'Save'), h('button', { class: 'btn', type: 'button', onclick: close }, 'Cancel'))));
   dlg.addEventListener('cancel', () => dlg.remove());

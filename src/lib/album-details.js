@@ -6,7 +6,8 @@ export const albumKey = a => 'album:' + (a.artist || '') + '|' + (a.album || '')
 const uniq = xs => [...new Set(xs.filter(Boolean))];
 const fmtLen = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60; return h ? `${h} h ${m} min` : m ? `${m} min ${sec} s` : `${sec} s`; };
 
-export function albumFacts(a, { libraryName = () => '' } = {}) {
+/// `extra`: facts from a chosen metadata candidate (metadata.js extraFacts) — added where the album doesn't already say.
+export function albumFacts(a, { libraryName = () => '', extra = null } = {}) {
   const ts = a.tracks, facts = [], add = (label, value, source) => { if (value !== undefined && value !== null && String(value).trim() !== '') facts.push({ label, value: String(value), source }); };
   const nfoAlbum = ts.map(t => t.nfo?.album).find(Boolean), nfoArtist = ts.map(t => t.nfo?.artist).find(Boolean);
   const remote = ts.some(t => t.remote), base = remote ? 'server' : 'tags', from = (field, fallback = base) => (ts.length && ts.every(t => t._nfoFilled?.has(field))) ? 'nfo' : fallback;   // tags unless every track's value was filled in from an .nfo
@@ -24,9 +25,11 @@ export function albumFacts(a, { libraryName = () => '' } = {}) {
   const dirs = uniq(ts.map(t => (t.src?.path || '').replace(/\/[^/]*$/, ''))); if (dirs.length && !remote) add('Folder', dirs.length === 1 ? dirs[0] : `${dirs.length} folders`, 'files');
   if (remote) add('From', uniq(ts.map(t => (t.src?.path || '').split('/')[0])).join(', '), 'server');
   const libs = uniq(ts.flatMap(t => [...(t.libs || [])]).map(libraryName)); if (libs.length) add('In libraries', libs.join(', '), 'bootleg');
+  for (const f of extra?.facts || []) if (!facts.some(x => x.label === f.label)) add(f.label, f.value, f.source);
   const text = [];
   if (nfoAlbum?.text) text.push({ label: 'Review / notes', text: nfoAlbum.text, source: 'album.nfo' });
   if (nfoArtist?.text) text.push({ label: 'About the artist', text: nfoArtist.text, source: 'artist.nfo' });
   for (const n of ts.flatMap(t => t.nfo?.texts || []).filter((x, i, arr) => arr.findIndex(y => y.path === x.path) === i)) text.push({ label: n.path.split('/').pop(), text: n.text, source: 'nfo' });
+  for (const x of extra?.text || []) text.push(x);
   return { facts, text };
 }

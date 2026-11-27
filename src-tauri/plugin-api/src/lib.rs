@@ -1,10 +1,13 @@
 // bootleg plugin API, Rust side (docs/PLUGIN-SPEC.md §5.3). Both the core and native plugins depend on this crate;
 // its major.minor is the spec version it implements.
 //   Jobs: long-running work on its own thread, reporting over a Tauri Channel, cancellable from JS by id.
+//   Secrets: the OS credential store (`secrets::plugin(id)` for a plugin's own; secrets.rs).
 //   (Media, Paths and Tags from §5.3 join here as their first users arrive.)
 use serde::Serialize;
 use std::{collections::HashMap, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex, OnceLock}};
 use tauri::ipc::Channel;
+
+pub mod secrets;
 
 pub const SPEC: &str = "2.0";
 

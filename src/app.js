@@ -28,10 +28,12 @@ import { initNowView } from '/lib/now-view.js';
 import { VizDock } from '/lib/viz-dock.js';
 import { ListenHeat, SpectroCache, IdbKV, MapKV } from '/lib/listen-heat.js';
 import { MiniHost } from '/lib/mini-host.js';
-import { SHARE_DEFAULTS } from '/lib/share.js';
+import { SHARE_DEFAULTS, openExternal } from '/lib/share.js';
 import { playActions, PLAY_DEFAULTS, PLAY_MODELS, ALBUM_CLICKS } from '/lib/play-actions.js';
 import { initDevices } from '/lib/devices-ui.js';
 import { filesFor } from '/lib/devices.js';
+import { registerProvider, listProviders, lookupAll, Chosen } from '/lib/metadata.js';
+import { Secrets, connKey, splitConfig, fullConfig, migrateConnections } from '/lib/secrets.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -40,7 +42,7 @@ const lib = new Library(), feed = new AudioFeed(), player = new Player(feed);
 const viz = new VizHost({ stage: $('#vizStage'), packSelect: $('#packSelect'), paramsEl: $('#packParams'), lookEl: $('#lookParams'), feed, player });
 function toast(msg, bad = false) { const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg); document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 3000); }
 lib.editKey = trackKey;      // tag edits made in bootleg are stored with the notes, under the same key
-const editTags = (ts, title) => openTagEditor(ts, { h, store: notes.store, keyOf: trackKey, toast, title });
+const editTags = (ts, title, suggest = null) => openTagEditor(ts, { h, store: notes.store, keyOf: trackKey, toast, title, suggest });
 const acts = playActions(player, { model: () => settings.playModel, toast, plural });       // what ▶ / double-click do (Settings → Playing)
 const SELF = window.__BOOTLEG_SELFTEST || null, mem = new Map();    // self-test mode: the shell injects this flag, and nothing below touches the real settings, library or notes
 const store = SELF ? { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } } : { get: (k, d) => { try { const v = localStorage.getItem('bootleg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('bootleg.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
@@ -180,7 +182,7 @@ function renderSplit(list) {
 }
 async function paintSplitPane(list = lib.albums().filter(a => { const q = $('#search').value.toLowerCase(); return !q || (a.album + ' ' + a.artist).toLowerCase().includes(q); })) {
   const a = list.find(x => x.key === splitKey); if (!a) return; const tok = ++splitToken;
-  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, editTags, trackStore: t => notes.store.get(trackKey(t)) });
+  const el = await albumPane(a, { libs, lib, store: notes.store, player, h, fmt, toast, cover, acts, editTags, trackStore: t => notes.store.get(trackKey(t)), meta: { providers: listProviders, chosen: metaChosen, lookup: q => lookupAll(q), open: openExternal, repaint: () => paintSplitPane() } });
   if (tok === splitToken) { const pane = $('#splitPane'), keep = pane.scrollTop; pane.replaceChildren(el); pane.scrollTop = keep; }
 }
 $('#view-albums').addEventListener('scroll', () => { const v = $('#view-albums'); if (settings.albumView === 'grid' && $('#albumGrid').dataset.more && v.scrollTop + v.clientHeight > v.scrollHeight - 700) { gridLimit += 300; renderAlbums(); } }, { passive: true });
@@ -204,7 +206,8 @@ let rTimer = 0; lib.addEventListener('change', () => { if (rTimer) return; rTime
 $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 
 // ------------------------------------------------------------------ adding music
-const libs = new Libraries(store); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
+const libs = new Libraries(store), secrets = new Secrets({ invoke: TAURI ? (c, a) => TAURI.core.invoke(c, a) : null, store }); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
+let metaChosen; try { metaChosen = new Chosen(SELF || !window.indexedDB ? new MapKV() : new IdbKV('bootleg-metadata', ['chosen'])); } catch { metaChosen = new Chosen(new MapKV()); }      // the release chosen for each album (metadata.js)
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
 const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, transition: 'gapless', matchTempo: false, djFade: 6, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
@@ -240,7 +243,7 @@ $('#addFiles').onclick = () => (TAURI ? addFilesDesktop().catch(e => toast(Strin
 $('#folderIn').onchange = e => { addSources(sourcesFromFiles(e.target.files), 'Scanned'); e.target.value = ''; };
 $('#filesIn').onchange = e => { addSources(sourcesFromFiles(e.target.files)); e.target.value = ''; };
 const scopeRoots = () => { const ls = libs.active === 'all' ? libs.list : [libs.get(libs.active)].filter(Boolean); return ls.flatMap(L => [...L.roots, ...L.connections]).map(x => ({ root: x })); };
-async function forgetLibrary(L) { for (const c of [...L.connections]) { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); } for (const r of [...L.roots]) { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); } lib.dropLibrary(L.id); }
+async function forgetLibrary(L) { for (const c of [...L.connections]) await removeConnection(L, c); for (const r of [...L.roots]) { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); } lib.dropLibrary(L.id); }
 const forgetActive = async () => { const targets = libs.active === 'all' ? libs.list : [libs.get(libs.active)]; for (const L of targets) await forgetLibrary(L); player.clear(); renderAll(); paintLibSel(); toast(libs.active === 'all' ? 'All libraries forgotten' : 'Library forgotten'); };
 function paintLibSel() {
   const sel = $('#libSel'); sel.replaceChildren(...libs.list.map(l => h('option', { value: l.id, selected: l.id === libs.active }, `${l.name}${l.mode === 'studio' ? ' ✎' : ''}`)), libs.list.length > 1 ? h('option', { value: 'all', selected: libs.active === 'all' }, 'All libraries') : null); sel.hidden = false; sel.value = libs.active;
@@ -248,7 +251,7 @@ function paintLibSel() {
 $('#libSel').onchange = e => { libs.setActive(e.target.value); lib.scope = libs.active; renderAll(); notes?.refresh?.(); };
 
 // Desktop: show the whole library from the cache immediately, then look for changes in the background.
-const sessionOf = r => { const c = libs.connection(r.conn), p = getSource(r.plugin); return c && p ? p.session(c.config) : null; };
+const sessionOf = r => { const c = libs.connection(r.conn), p = getSource(r.plugin); return c && p ? p.session(fullConfig(secrets, c)) : null; };
 async function loadChunked(srcs, libId) {      // shows the cached library in slices so the window stays responsive
   scan.on = true; try { await lib.addChunked(srcs, libId, { onProgress: (n, total) => { scan.text = `Loading your library… ${n.toLocaleString()} of ${total.toLocaleString()}`; renderAll(); } }); } finally { scan.on = false; }
 }
@@ -264,11 +267,17 @@ async function restoreFromCache() {
 // Startup: the cached library shows at once, then changes are looked for in the background (the window is usable throughout).
 // (0.2.0–0.3.0 skipped this on the desktop: opening files from the OS took its place instead of running beside it.)
 async function startLibrary() { await restoreFromCache(); if (settings.scanOnStart || (!lib.tracks.length && !lib.renders.length)) await syncAll(true); }
+// A new connection: its secret fields (the source plugin's `secrets`) go to the keychain, the rest is saved with the library.
+async function addConnection(L, p, vals, id = 'c' + Date.now().toString(36)) {
+  const r = await p.connect(vals), { config, secret } = splitConfig(p, r.config), conn = { id, plugin: p.id, title: r.title, config };
+  await secrets.setJSON(connKey(conn), secret); libs.addConnection(L.id, conn); return conn;
+}
+async function removeConnection(L, c) { libs.removeConnection(L.id, c.id); await secrets.delete(connKey(c)).catch(e => console.warn('secret', e)); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); }
 async function syncConnection(conn, L) {
   const p = getSource(conn.plugin); if (!p) throw new Error(`The “${conn.plugin}” source plugin is not installed`);
   const key = rootKey(p, conn.id); scan.on = true; scan.text = 'Connecting…'; paintProgress();
   try {
-    const ses = p.session(conn.config), srcs = await scanConnection(p, ses, conn.id, { onProgress: t => { scan.text = t; } }); const before = lib.tracks.length; lib.add(srcs, L.id); const removed = lib.removeMissing(key, new Set(srcs.map(x => x.path)), L.id); await cache.putIndex(key, srcs.map(toIndexEntry));
+    const ses = p.session(fullConfig(secrets, conn)), srcs = await scanConnection(p, ses, conn.id, { onProgress: t => { scan.text = t; } }); const before = lib.tracks.length; lib.add(srcs, L.id); const removed = lib.removeMissing(key, new Set(srcs.map(x => x.path)), L.id); await cache.putIndex(key, srcs.map(toIndexEntry));
     // ratings, stars and playlists the server keeps (a failure here never fails the scan itself)
     scan.text = 'Syncing ratings and playlists…'; const tracks = srcs.map(x => { const t = lib._byPath.get(x.path); return t?.kind === 'track' ? { key: trackKey(t), item: x.remote.item } : t?.kind === 'render' && x.remote.item.song ? { key: trackKey(t), item: x.remote.item.song } : null; }).filter(Boolean);      // a server's stem sets: their song carries the grade
     try { await remoteAnn.pull(p, conn.id, ses, tracks); } catch (e) { toast(`${conn.title}: could not sync ratings/playlists (${e.message || e})`, true); }
@@ -402,11 +411,12 @@ function addExtView(extId, { id = extId, title, mount }) {
 // import/annotate (provenance, tags, notes and defects on recordings, keyed like everything else the user writes).
 const pluginRuntime = { os: TAURI ? '' : 'web', arch: '', native: [], spec: '2.0' };
 async function libTrackByPath(path, ms = 15000) { const t0 = Date.now(); for (;;) { const t = lib._byPath.get(path); if (t && (t.tagged || t.kind !== 'track')) return t; if (Date.now() - t0 > ms) return t || null; await new Promise(r => setTimeout(r, 150)); } }
-async function annotate(by, path, { tags, notes: ns, provenance, defects } = {}) {
+async function annotate(by, path, { tags, removeTags, notes: ns, provenance, defects } = {}) {
   const t = await libTrackByPath(path); if (!t) throw new Error(`not in the library: ${path}`); const key = trackKey(t), st = notes.store;
-  if (tags?.length) { const r = await st.get(key); await st.setTags(key, [...r.tags, ...tags]); }
+  if (tags?.length || removeTags?.length) { const r = await st.get(key), drop = new Set(removeTags || []), next = [...new Set([...r.tags.filter(x => !drop.has(x)), ...(tags || [])])]; if (next.join('\n') !== r.tags.join('\n')) await st.setTags(key, next); }
   if (provenance) await st.patchProvenance(key, provenance);
-  if (ns) { const r = await st.get(key); for (const n of r.notes.filter(n => n.by === by)) await st.removeNote(key, n.id); for (const n of ns) { const x = await st.addNote(key, typeof n === 'string' ? { text: n } : n); await st.editNote(key, x.id, { by }); } }
+  if (ns) { const r = await st.get(key), mine = r.notes.filter(n => n.by === by), want = ns.map(n => (typeof n === 'string' ? n : n.text)); if (mine.map(n => n.text).join('\n') === want.join('\n')) ns = null; else for (const n of mine) await st.removeNote(key, n.id); }
+  if (ns) { for (const n of ns) { const x = await st.addNote(key, typeof n === 'string' ? { text: n } : n); await st.editNote(key, x.id, { by }); } }
   if (defects) await st.setDefects(key, by, defects);
   return key;
 }
@@ -414,11 +424,13 @@ const extApi = (id, meta = {}) => ({
   id, player, library: lib, toast,
   viz: { get pack() { return viz.pack; }, get packs() { return viz.packs; }, setPack: pid => viz.setPack(pid), onFrame: cb => viz.onFrame(cb) },
   settings: { get: (k, d) => store.get(`ext.${id}.${k}`, d), set: (k, v) => store.set(`ext.${id}.${k}`, v) },
-  ui: { addView: v => addExtView(id, v) },
+  secrets: secrets.scoped(id),       // every extension and plugin: passwords, tokens, keys, in the OS keychain (docs/SECRETS.md)
+  ui: { addView: v => addExtView(id, v), openExternal: url => openExternal(url) },      // openExternal: https links, in the user's browser
   audio: { get context() { return feed.ctx; }, insert: (node, out) => player.insert(node, out) },
   ...(meta.kind === 'plugin' ? {
-    platform: { ...pluginRuntime, appVersion: '', status: extensions.availability(id).status },
+    platform: { ...pluginRuntime, appVersion: pluginRuntime.appVersion || build?.version || '', status: extensions.availability(id).status },
     net: { fetch: netFetch },
+    metadata: { register: p => registerProvider(p), lookup: (q, o) => lookupAll(q, o), get providers() { return listProviders().map(p => ({ id: p.id, name: p.name })); } },      // register returns the function that unregisters it (call it in stop())
     ...(TAURI && meta.native && pluginRuntime.native.includes(id) ? { native: nativeApi(TAURI, id) } : {}),
     ...(TAURI ? { dialog: { folder: async ({ title } = {}) => { const d = await TAURI.dialog.open({ directory: true, multiple: false, title }); if (d) await TAURI.core.invoke('allow_path', { path: d }); return d || null; } } } : {}),
     library: Object.assign(Object.create(lib), {
@@ -440,6 +452,15 @@ const extApi = (id, meta = {}) => ({
 const extensions = new Extensions({ store, api: extApi, runtime: pluginRuntime });
 extensions.addEventListener('change', () => { for (const r of [...extViews.values()]) if (!extensions.running.has(r.extId)) r.remove(); if (view === 'settings') paintSettings(); });
 const STATUS_LABEL = { supported: '', experimental: 'experimental here', unavailable: 'not available here', missing: 'not in this build' };
+// A `secret` setting (a token, a password, a key): goes to the keychain (api.secrets, under the setting's key), never into
+// settings, and is never shown again; the field only says whether one is saved. Clearing it deletes the secret.
+function secretInput(id, f) {
+  const sc = secrets.scoped(id), inp = h('input', { type: 'password', autocomplete: 'off', placeholder: '…', onchange: async ev => {
+    try { await sc.set(f.key, ev.target.value.trim()); ev.target.value = ''; await paint(); if (extensions.running.has(id)) { await extensions.stop(id); await extensions.start(id); } } catch (err) { toast(`${f.label}: ${err.message || err}`, true); } } });
+  const rm = h('button', { class: 'link', hidden: true, onclick: async ev => { ev.preventDefault(); await sc.delete(f.key); await paint(); if (extensions.running.has(id)) { await extensions.stop(id); await extensions.start(id); } } }, 'remove');
+  const paint = async () => { const has = !!(await sc.get(f.key).catch(() => null)); inp.placeholder = has ? 'saved (type to replace)' : (f.placeholder || 'not set'); rm.hidden = !has; };
+  paint(); return h('span', {}, inp, ' ', rm);
+}
 function extensionRows() {
   if (!extensions.list.length) return [h('div', { class: 'muted small' }, 'No plugins installed.')];
   return extensions.list.flatMap(e => {
@@ -455,6 +476,7 @@ function extensionRows() {
       const v = extensions.setting(e.id, f.key, f.default), set = val => extensions.setSetting(e.id, f.key, val);
       const input = f.type === 'select' ? h('select', { onchange: ev => set(ev.target.value) }, ...(f.options || []).map(o => h('option', { value: o, selected: o === v }, o)))
         : f.type === 'bool' ? h('input', { type: 'checkbox', checked: !!v, onchange: ev => set(ev.target.checked) })
+        : f.type === 'secret' ? secretInput(e.id, f)
         : h('input', { type: f.type === 'number' ? 'number' : 'text', value: v, onchange: ev => set(f.type === 'number' ? +ev.target.value : ev.target.value) });
       rows.push(h('label', { class: 'srow sub' }, h('span', {}, h('b', {}, f.label), f.hint ? h('small', {}, f.hint) : ''), input));
     }
@@ -473,7 +495,7 @@ function connectForm(L) {
   const go = h('button', { class: 'btn primary', onclick: async () => {
     const p = getSource(sel.value); err.textContent = ''; for (const f of p.fields) if (f.required && !vals[f.key]) { err.textContent = `${f.label} is required`; return; }
     go.disabled = true; go.textContent = 'Connecting…';
-    try { const { config, title } = await p.connect(vals), conn = { id: 'c' + Date.now().toString(36), plugin: p.id, title, config }; libs.addConnection(L.id, conn); formOpen.delete(L.id); const r = await syncConnection(conn, L); toast(`${title}: ${r.total.toLocaleString()} tracks`); renderAll(); paintSettings(); paintLibSel(); }
+    try { const conn = await addConnection(L, p, vals); formOpen.delete(L.id); const r = await syncConnection(conn, L); toast(`${conn.title}: ${r.total.toLocaleString()} tracks`); renderAll(); paintSettings(); paintLibSel(); }
     catch (e) { err.textContent = e.message || String(e); go.disabled = false; go.textContent = 'Connect'; } } }, 'Connect');
   wrap.append(h('div', { class: 'lib-head' }, sel), fields, err, h('div', { class: 'cbtns' }, go, h('button', { class: 'btn', onclick: () => { formOpen.delete(L.id); paintSettings(); } }, 'Cancel')));
   return wrap;
@@ -496,7 +518,7 @@ function tagFileSettings(row, chk, num) {
     row('Review and write', last ? `Last run ${new Date(last.at).toLocaleString()}: ${last.ok} written, ${last.failed} not written${last.lines.length ? ' — ' + last.lines.slice(0, 3).join('; ') : ''}` : 'Not run yet.', h('button', { class: 'btn primary', id: 'tagReview', onclick: () => openTagReview(tagFiles, { h, toast, onDone: () => { if (view === 'settings') paintSettings(); } }) }, `Review edits… (${lib.tracks.filter(t => t.edited).length})`)));
   return out;
 }
-let build = null; fetch('/build.json').then(r => r.json()).then(j => { build = j; }).catch(() => {});
+let build = null; fetch('/build.json').then(r => r.json()).then(j => { build = j; pluginRuntime.appVersion = j.version || ''; }).catch(() => {});
 async function paintSettings() {
   const box = $('#settingsBody'), st = await cache.stats(), row = (label, hint, input) => h('label', { class: 'srow' }, h('span', {}, h('b', {}, label), hint ? h('small', {}, hint) : ''), input);
   const chk = k => h('input', { type: 'checkbox', checked: !!settings[k], onchange: e => { settings[k] = e.target.checked; applySettings(); } });
@@ -508,7 +530,7 @@ async function paintSettings() {
       h('button', { class: 'btn', onclick: async () => { libs.setActive(L.id); lib.scope = L.id; paintLibSel(); TAURI ? await addFolderDesktop().catch(e => toast(String(e), true)) : $('#folderIn').click(); paintSettings(); } }, 'Add folder here'),
       h('button', { class: 'btn', disabled: libs.list.length < 2, title: libs.list.length < 2 ? 'Keep at least one library' : 'Remove this library (your files are untouched; notes are kept)', onclick: async () => { await forgetLibrary(L); libs.remove(L.id); lib.scope = libs.active; renderAll(); paintLibSel(); paintSettings(); } }, 'Delete')),
     h('div', { class: 'muted small' }, MODES[L.mode].label === 'Studio' ? 'Studio: status, ideas, to-dos, mix notes and versions; how-it-was-made provenance.' : 'Listening: ratings, memories, stories; where-the-recording-came-from provenance.'),
-    L.connections.length ? h('div', { class: 'lib-roots' }, ...L.connections.map(c => h('span', {}, '☁ ', h('b', {}, c.title), ' ', h('span', { class: 'muted' }, getSource(c.plugin)?.name || c.plugin), ' ', h('button', { class: 'link', onclick: () => syncAll().then(paintSettings) }, 'sync'), ' ', h('button', { class: 'link', onclick: async () => { libs.removeConnection(L.id, c.id); await cache.delIndex(`${c.plugin}:${c.id}`).catch(() => {}); await remoteAnn.forget(c.plugin, c.id); lib.removeMissing(`${c.plugin}:${c.id}`, new Set(), L.id); renderAll(); paintSettings(); } }, 'disconnect')))) : '',
+    L.connections.length ? h('div', { class: 'lib-roots' }, ...L.connections.map(c => h('span', {}, '☁ ', h('b', {}, c.title), ' ', h('span', { class: 'muted' }, getSource(c.plugin)?.name || c.plugin), ' ', h('button', { class: 'link', onclick: () => syncAll().then(paintSettings) }, 'sync'), ' ', h('button', { class: 'link', onclick: async () => { await removeConnection(L, c); lib.removeMissing(`${c.plugin}:${c.id}`, new Set(), L.id); renderAll(); paintSettings(); } }, 'disconnect')))) : '',
     connectForm(L),
     L.roots.length ? h('div', { class: 'lib-roots' }, ...L.roots.map(r => h('span', {}, h('code', {}, r), ' ', h('button', { class: 'link', onclick: async () => { libs.removeRoot(L.id, r); if (!libs.ofRoot(r)) await cache.delIndex(r).catch(() => {}); lib.removeMissing(r, new Set(), L.id); renderAll(); paintSettings(); } }, 'remove')))) : h('div', { class: 'muted small' }, TAURI ? 'No folders yet.' : 'In the browser, files you add stay for this session (the desktop app remembers folders).')));
   const newName = h('input', { placeholder: 'New library name…', id: 'newLibName' }), newMode = h('select', { id: 'newLibMode' }, ...Object.entries(MODES).map(([k, m]) => h('option', { value: k }, m.label)));
@@ -548,6 +570,7 @@ async function paintSettings() {
     row('Read .nfo files', 'album.nfo / artist.nfo (Kodi style) and plain-text .nfo in your folders: shown with the track and searchable.', chk('useNfo')),
     row('Fill missing tags from .nfo', 'Tags in the files always win; an .nfo only supplies what is missing (album, artist, year, genre).', chk('nfoFill')),
     h('h3', {}, 'Plugins'), ...extensionRows(),
+    h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'Secrets'), h('small', {}, `Passwords, tokens and keys (servers’ and plugins’) are kept ${secrets.where}.`)), secrets.secure ? h('span', { class: 'pbadge ok' }, 'secure') : h('span', { class: 'pbadge warn' }, 'not encrypted')),
     h('h3', {}, 'About'),
     h('div', { class: 'srow' }, h('span', {}, h('b', {}, 'bootleg'), h('small', {}, build ? `version ${build.version} · build ${build.commit || 'local'} · ${build.date}` : 'local build')), h('span', { class: 'muted small' }, 'MIT licensed')),
     h('h3', {}, 'Maintenance'),
@@ -651,6 +674,32 @@ const remoteAnn = new RemoteAnnotations({ notes: notes.store, kv: store, getPlug
 // ------------------------------------------------------------------ desktop self-test (BOOTLEG_SELFTEST=<music dir> BOOTLEG_SELFTEST_OUT=<file>): proves the packaged app can scan, tag, stream and analyse real files
 // The CD plugin against its simulator (plugin spec §7.3): rip the scratched sample disc with the real native plugin, import
 // it, and check the library shows the damage. Runs only when the sim backend is selected (BOOTLEG_CD_BACKEND=sim).
+// The library checker against the real library of the self-test (the fixtures and the CD rip above): every file decoded and
+// measured natively, the ripped album put together as a disc (AccurateRip offline here), and a missing file reported.
+async function selfTestChecker() {
+  if (!pluginRuntime.native.includes('checker')) return { skipped: 'not in this build' };
+  const n = nativeApi(TAURI, 'checker'), local = lib.tracks.filter(t => t.src?.kind === 'tauri'), { albums } = await import('/plugins/checker/checker-logic.js');
+  const request = { files: [...local.map(t => t.src.path), '/nonexistent/x.flac'], albums: albums(local), recheck: true, accuraterip: true }, evs = [];
+  const sum = await n.job('check', { request }, e => { if (e.type === 'event') evs.push(e.data); }).done;
+  const files = evs.filter(e => e.kind === 'file'), alb = evs.filter(e => e.kind === 'album'), self = files.find(f => f.check?.format === 'flac');
+  const again = await n.job('check', { request: { ...request, recheck: false } }, () => {}).done;
+  return { files: files.length, read: sum.read, cachedAgain: again.cached, albums: alb.map(a => a.check.state).join(','), md5: self?.check?.md5, missing: files.find(f => f.path === '/nonexistent/x.flac')?.error || '',
+    ok: files.length === request.files.length && files.filter(f => f.check).length === local.length && alb.length >= 1 && alb.every(a => a.check.state === 'offline') && self?.check?.md5 === 'ok' && !!files.find(f => f.path === '/nonexistent/x.flac')?.error && again.cached === local.length };
+}
+// The Record plugin against its simulated input: record a side (a WAV played as if from a turntable), find its two
+// tracks, save them as FLAC next to the self-test library, import them with their provenance, delete the raw recording.
+async function selfTestCapture() {
+  if (!pluginRuntime.native.includes('capture')) return { skipped: 'not in this build' };
+  const n = nativeApi(TAURI, 'capture'), bi = await n.invoke('backend_info'); if (bi.backend !== 'sim') return { skipped: 'backend ' + bi.backend };
+  const { tracksFrom, importInfo } = await import('/plugins/capture/capture-logic.js'), devs = await n.invoke('devices'); let lv = 0;
+  const rec = await n.job('record', { device: devs[0].id, rate: 0, name: 'selftest' }, e => { if (e.type === 'event') lv++; }).done;
+  const a = await n.invoke('analyze', { path: rec.path, points: 400 }), tracks = tracksFrom(a, 1).map((t, i) => ({ ...t, title: ['Low', 'High'][i] || 'x' }));
+  const dest = libs.allRoots()[0].root.replace(/[\\/][^\\/]+$/, '') + '/Captured', saved = await n.job('save', { request: { recording: rec.path, dest, album: 'Self Test LP', albumArtist: 'Tester', tracks, bits: 24, declick: true, source: 'vinyl' } }, () => {}).done;
+  const api = extApi('capture', { kind: 'plugin', native: {} }); await api.library.import(saved.map(s => s.path), importInfo(saved, { source: 'vinyl', deck: 'Sim deck', input: devs[0].name, meta: { album: 'Self Test LP' } }));
+  const lt = lib._byPath.get(saved[1].path), r = lt && await notes.store.get(trackKey(lt)); const kept = await n.invoke('recordings'); await n.invoke('discard', { path: rec.path }); const after = await n.invoke('recordings');
+  return { seconds: Math.round(rec.seconds), levels: lv, splits: a.splits.map(x => +x.toFixed(1)).join(','), saved: saved.length, title: lt?.title, prov: r?.provenance?.kind, kept: kept.length, discarded: after.length === kept.length - 1,
+    ok: Math.abs(rec.seconds - 53.5) < 0.5 && lv > 10 && a.splits.length === 1 && Math.abs(a.splits[0] - 24.5) < 0.6 && saved.length === 2 && lt?.title === 'High' && r?.provenance?.kind === 'vinyl-rip' && after.length === kept.length - 1 };
+}
 async function selfTestCd(dir) {
   if (!pluginRuntime.native.includes('cd')) return { skipped: 'not in this build' };
   const cdn = nativeApi(TAURI, 'cd'), bi = await cdn.invoke('backend_info'); if (bi.backend !== 'sim') return { skipped: 'backend ' + bi.backend };
@@ -677,7 +726,10 @@ async function selfTest(dir) {
     { await lib.flush(); const read = lib.stats.read, srcs = await scanFolder(dir); lib.clear(); lib.add(srcs); await wait(() => lib.tracks.every(t => t.tagged)); out.cachedRescan = lib.stats.read === read && lib.stats.cached >= out.tracks; out.cacheFiles = (await cache.stats()).files; await cache.putIndex(dir, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); libs.addRoot(libs.target().id, dir); lib.clear(); const r0 = lib.stats.read, tr = performance.now(); await restoreFromCache(); await wait(() => lib.tracks.every(t => t.tagged)); out.restoreMs = Math.round(performance.now() - tr); out.restored = lib.tracks.length === out.tracks && lib.renders.length === out.renders && lib.stats.read === r0; libs.removeRoot(libs.target().id, dir); await cache.delIndex(dir); }
     const sub = await TAURI.core.invoke('selftest_subsonic');
     if (sub && !out.autoplayBlocked) {      // a source plugin end to end: connect, scan, stream (WebKit can't read it cross-origin, so this exercises the HTTP plugin + blob fallback)
-      const L = libs.target(), { config, title } = await getSource('subsonic').connect({ url: sub, username: 'alice', password: 'secret' }), conn = { id: 'st', plugin: 'subsonic', title, config }; libs.addConnection(L.id, conn);
+      const L = libs.target(), conn = await addConnection(L, getSource('subsonic'), { url: sub, username: 'alice', password: 'secret' }, 'st'); { const tok = (await secrets.getJSON(connKey(conn)))?.token; out.secretKept = !('token' in conn.config) && !!tok && !JSON.stringify(store.get('libraries')).includes(tok) && fullConfig(secrets, conn).token === tok;      // the token is in the (self-test, in-memory) keychain, not in saved settings
+        const old = { id: 'mig', plugin: 'subsonic', title: 'old', config: { url: sub, username: 'alice', salt: 'ab', token: 'legacy' } }; libs.addConnection(L.id, old); const moved = await migrateConnections(secrets, libs, getSource);      // a connection saved before secrets existed
+        out.secretMigrated = moved === 1 && !('token' in libs.connection('mig').config) && (await secrets.getJSON('source/subsonic/mig'))?.token === 'legacy'; await removeConnection(L, libs.connection('mig')); out.secretMigrated &&= (await secrets.get('source/subsonic/mig')) === null;
+        { const ps = extApi('selftest-ext').secrets; await ps.set('cert', 'x'); secrets.cache.delete('plugin/selftest-ext/cert'); out.extSecret = (await ps.get('cert')) === 'x' && (await TAURI.core.invoke('secret_get', { key: 'plugin/selftest-ext/cert' })) === 'x'; await ps.delete('cert'); } }
       const r = await syncConnection(conn, L); out.remoteTracks = r.total; const rt = lib.tracks.find(t => t.remote); await player.playList([rt], 0); await wait(() => player.playing && player.pos() > 0.7); let pk = 0; for (let i = 0; i < 20; i++) { pk = Math.max(pk, ...feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } out.remotePeak = pk; out.remoteBlob = player.audio.src.startsWith('blob:');
     }
     const dlRaw = await TAURI.core.invoke('selftest_dlna'), [dl, dlFlags = ''] = (dlRaw || '').split(';');
@@ -707,6 +759,13 @@ async function selfTest(dir) {
       await player.ensureStems(); await wait(() => player.mode === 'deck' && player.deck.stems.length === r.stems.length, 20000); out.package = r.title === 'Packaged Self Test' && r.stems.length >= 2; player.pause();
     } catch (e) { out.packageDiag = String(e?.message || e); }
     out.cd = await selfTestCd(dir).catch(e => ({ error: String(e?.message || e) }));
+    out.checker = await selfTestChecker().catch(e => ({ error: String(e?.message || e) }));
+    if (pluginRuntime.native.includes('acoustid')) {      // the AcoustID fingerprinter on a real file of the self-test library (no lookup: that needs a key and the network)
+      const f = lib.tracks.find(t => t.src?.kind === 'tauri' && t.duration > 4), got = [];
+      await nativeApi(TAURI, 'acoustid').job('fingerprint', { paths: [f.src.path] }, e => { if (e.type === 'event') got.push(e.data); }).done.catch(e => got.push({ error: String(e) }));
+      out.acoustid = { ok: !!got[0]?.fingerprint && got[0].fingerprint.startsWith('AQ') && got[0].duration > 0, duration: got[0]?.duration, error: got[0]?.error };
+    } else out.acoustid = { skipped: 'not in this build' };
+    out.capture = await selfTestCapture().catch(e => ({ error: String(e?.message || e) }));
     // syncing to a player: pair a card folder that already holds a file of the user's, mirror one track and a playlist onto it,
     // then mirror nothing — bootleg's copy goes, the user's file stays (the shell checks the files on disk afterwards)
     try {
@@ -735,6 +794,7 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
   applySettings(); paintLibSel(); updateBar(); renderAll();      // the window is interactive immediately; the library follows
   loadDamaged('*').catch(() => {});
   if (TAURI) try { Object.assign(pluginRuntime, await TAURI.core.invoke('plugin_runtime')); } catch (e) { console.warn('plugin runtime', e); }
+  await secrets.init(); await migrateConnections(secrets, libs, getSource).catch(e => console.warn('secret migration', e)); await secrets.preload(libs.allConnections().map(x => connKey(x.conn)));      // before any connection's session is built
   await Promise.all([viz.init(), lib.attachCache(cache).catch(() => {}), window.__BOOTLEG_SELFTEST ? null : extensions.init()]);
   await migrateRemoteKeys(notes.store).catch(e => console.warn('key migration', e));
   if (tagFiles && settings.tagWrite) await tagFiles.allowFolders();      // the share folders chosen for writing are opened again      // before any server sync reads ratings
@@ -743,5 +803,5 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
     if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
     startLibrary().catch(e => toast(String(e), true));      // and, in every case, the library: from the cache at once, then a look for changes
   }
-  window.__bootleg = { mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { metaChosen, listProviders, secrets, mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

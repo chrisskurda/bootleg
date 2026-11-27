@@ -39,7 +39,7 @@ Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's 
 - A library can mix folders and any number of connections. Libraries have modes (listening / studio).
 
 ## Rules of thumb
-- **Never store a plain password.** Derive what you need (token + salt, API key, OAuth refresh token) in `connect()`. Desktop keychain storage is a planned improvement; until then stored secrets are in app storage on the user's machine.
+- **Never store a plain password.** Derive what you need (token + salt, API key, OAuth refresh token) in `connect()`, and list those fields in `secrets: [...]`: the app keeps them in the OS keychain instead of the saved settings and hands them back to `session(config)` ([SECRETS.md](SECRETS.md)).
 - **`scan` should yield pages** so the UI shows progress on big libraries. Honour `signal`.
 - **IDs must be stable**; `changed` should increase when an item is edited.
 - **Network:** use `netFetch` from `./net.js`. The desktop app routes it through the Tauri HTTP plugin (no CORS limits); in a browser the service must allow CORS. Audio playback: if the media element can't load or analyse a cross-origin stream, the player fetches the file (via your `fetch`) and plays it from a blob.

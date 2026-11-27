@@ -26,10 +26,16 @@ bootleg-sync = { path = "../vendor/bootleg-sync" }
 toml = "1"
 # Native plugins (docs/PLUGIN-SPEC.md §5.1): compiled in behind a `plugin-<id>` feature; first-party ones are on by default.
 bootleg-plugin-cd = { path = "../plugins/cd/native", features = ["tauri"], optional = true }
+bootleg-plugin-checker = { path = "../plugins/checker/native", features = ["tauri"], optional = true }
+bootleg-plugin-acoustid = { path = "../plugins/acoustid/native", features = ["tauri"], optional = true }
+bootleg-plugin-capture = { path = "../plugins/capture/native", features = ["tauri"], optional = true }
 
 [features]
-default = ["plugin-cd"]
+default = ["plugin-cd", "plugin-checker", "plugin-acoustid", "plugin-capture"]
 plugin-cd = ["dep:bootleg-plugin-cd"]
+plugin-checker = ["dep:bootleg-plugin-checker"]
+plugin-acoustid = ["dep:bootleg-plugin-acoustid"]
+plugin-capture = ["dep:bootleg-plugin-capture"]
 
 [profile.release]
 opt-level = "s"

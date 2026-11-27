@@ -1,0 +1,25 @@
+[package]
+name = "bootleg-plugin-acoustid"
+version = "0.1.0"
+description = "bootleg AcoustID plugin: audio fingerprints (Chromaprint-compatible) for identifying tracks by their sound (plugin spec 2.0)"
+license = "MIT"
+edition = "2021"
+publish = false
+links = "bootleg-acoustid"
+
+[features]
+tauri = ["dep:tauri", "dep:bootleg-plugin-api", "dep:tauri-plugin"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+# MIT: a pure Rust port of Chromaprint (whose C library is LGPL and isn't used).
+rusty-chromaprint = "0.3"
+# MPL-2.0 (file-level copyleft: fine beside MIT).
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "wav", "aiff", "pcm", "ogg", "vorbis", "flac"] }
+tauri = { version = "2", optional = true }
+bootleg-plugin-api = { path = "../../../src-tauri/plugin-api", optional = true }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"], optional = true }

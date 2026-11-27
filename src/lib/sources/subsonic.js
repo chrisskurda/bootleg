@@ -24,8 +24,9 @@ export const subsonic = {
   fields: [
     { key: 'url', label: 'Server address', type: 'url', required: true, placeholder: 'https://music.example.com', hint: 'The address you open in a browser (without /rest).' },
     { key: 'username', label: 'Username', type: 'text', required: true },
-    { key: 'password', label: 'Password', type: 'password', required: true, hint: 'Not stored: only a salted token is kept.' },
+    { key: 'password', label: 'Password', type: 'password', required: true, hint: 'Not stored: only a salted token is kept, in the system keychain.' },
   ],
+  secrets: ['token'],       // kept in the system keychain, not with the library settings (src/lib/secrets.js)
   async connect(v) {
     const salt = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join(''), config = { url: base(v.url), username: v.username.trim(), salt, token: md5(v.password + salt) };
     const ses = session(config), j = await call(ses, 'ping');   // wrong credentials / not a Subsonic server → throws with the server's message

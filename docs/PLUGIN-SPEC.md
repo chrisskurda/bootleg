@@ -5,11 +5,11 @@ Status: **draft, partly implemented** (2026-11-26). The first plugin built on it
 **Implemented so far:**
 - the manifest and `plugins/` packages (§2, §3), and the platform levels and confirmation (§4)
 - native code compiled in behind a Cargo feature, and the capability added at run time (§5.1, §5.4)
-- `bootleg-plugin-api` with `SPEC` and `Jobs` (§5.3)
-- these parts of §6: `api.platform`, `api.native.invoke`/`job`, `api.net.fetch`, `api.dialog.folder`, `api.library.import`/`annotate`/`defects.clear`/`roots`, and defects (stored, timeline bands, the ⚠ badge, `has:defects`)
+- `bootleg-plugin-api` with `SPEC`, `Jobs` and `secrets` (§5.3)
+- these parts of §6: `api.platform`, `api.native.invoke`/`job`, `api.net.fetch`, `api.secrets`, `api.ui.openExternal`, `api.metadata.register` / `lookup` / `providers` (album lookups, the album pane and the tag editor), `api.dialog.folder`, `api.library.import`/`annotate` (with `removeTags`)/`defects.clear`/`roots`, `secret` settings, and defects (stored, timeline bands, the ⚠ badge, `has:defects`)
 - the desktop self-test scenario (§7.3)
 
-**Not implemented yet:** `Media`, `Paths`, `Tags` (§5.3), `api.native.on`, `api.sources.*`, `api.outputs.register`, `api.metadata.register`, `api.media`, `api.devices`, `api.transcode`, and the *Damaged* smart list. The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
+**Not implemented yet:** `Media`, `Paths`, `Tags` (§5.3), `api.native.on`, `api.sources.*`, `api.outputs.register`, metadata queries of kind `recording`, `api.media`, `api.devices`, `api.transcode`, and the *Damaged* smart list. The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
 
 Spec 1 is what exists today: JS-only extensions ([EXTENSIONS.md](EXTENSIONS.md)) plus the source and output contracts that are compiled into the app ([SOURCE-PLUGINS.md](SOURCE-PLUGINS.md)). Spec 2.0 keeps all of that working and adds:
 
@@ -27,6 +27,7 @@ Spec 1 is what exists today: JS-only extensions ([EXTENSIONS.md](EXTENSIONS.md))
 - A folder that has an `extension.json` and no `plugin.json` is treated as **spec 1** and gets the spec 1 API unchanged.
 - Any change to the spec is a user-visible change: it gets a CHANGELOG line, and a major spec change bumps the app's MAJOR version (MINOR while the app is 0.x), as [CONTRIBUTING.md](../CONTRIBUTING.md) requires.
 - The Rust crate `bootleg-plugin-api` uses the spec's major.minor as its own version.
+- A plugin's own `version` is separate from both: each plugin has its own SemVer, CHANGELOG and release tag, and updates independently of the app through the update index. See [UPDATES.md](UPDATES.md) (draft).
 
 ## 2. Package layout
 ```
@@ -70,7 +71,7 @@ plugins/<id>/
 | `spec` | the spec version this plugin was written against (§1) |
 | `id` | short and stable, `[a-z0-9-]`. Becomes the Tauri plugin name `bootleg-<id>`, the Cargo feature `plugin-<id>`, the settings namespace and the source id |
 | `provides` | any of `source`, `output`, `metadata`, `view`, `audio`, `remote`, `device`. Informational: shown in Settings, and checked against what the plugin actually registers (it may not register a kind it did not declare) |
-| `settings` | spec 1 field types `text` and `number`, plus `select` (`options`), `bool`, `folder` (desktop folder picker) and `template` (a naming pattern, with a preview) |
+| `settings` | spec 1 field types `text` and `number`, plus `select` (`options`), `bool`, `folder` (desktop folder picker), `template` (a naming pattern, with a preview) and `secret` (a password field whose value goes to `api.secrets` under the setting's key, never to settings; it is never shown again, only whether one is saved, and changing it restarts the plugin) |
 | `platforms` | one entry per target (§4). A target left out counts as `unavailable` |
 | `native` | present if the plugin has a Rust part (§5). `crate`: the folder; `feature`: the Cargo feature that compiles it in |
 
@@ -124,6 +125,7 @@ A small crate in `src-tauri/plugin-api/` that both the core and native plugins d
 |---|---|
 | `SPEC` | the spec version |
 | `Jobs` | spawns cancellable long-running work: `jobs.spawn(channel, \|ctx\| …)`. Inside the work, `ctx.progress(fraction, text)`, `ctx.log(level, line)`, `ctx.event(json)` and `ctx.cancelled()`. Each job gets an id, and the core's `plugin_job_cancel(id)` cancels it. Jobs run on their own threads, so a blocking device read never blocks the UI |
+| `secrets` | the OS credential store ([SECRETS.md](SECRETS.md)). `secrets::plugin(id)` → `get(name)`, `set(name, value)`, `delete(name)`: the same items the plugin's JS reaches with `api.secrets`. A call can wait on a keychain prompt, so make it from a job or a worker thread |
 | `Media` | `media.register(Box<dyn MediaSource>) → stream id`, with `MediaSource { len(), mime(), read_at(offset, buf) }`. The core serves the stream with Range support to `<audio>` and to cast targets through the existing LAN media server. On Linux, where WebKitGTK can't stream a custom scheme, it falls back to a blob, as files already do |
 | `Paths` | resolves the plugin's data/cache directories, and adds a folder the user picked to the app's file scope, the same way `allow_path` does |
 | `Tags` | the core's lofty-based tag writer (`write_tags`), so plugins don't carry their own copy |
@@ -133,7 +135,13 @@ A small crate in `src-tauri/plugin-api/` that both the core and native plugins d
 Each native crate ships `permissions/default.toml`, which allows its commands. When the feature is on, the build adds `bootleg-<id>:default` to the main window's capability, and never to the mini window's. A JS plugin can reach only its own plugin's commands through `api.native` (§6). Since all code in the main webview is trusted the same, this is about keeping plugins tidy and does not sandbox them.
 
 ## 6. JS API 2.0 (`activate(api)`)
-Everything from spec 1 is unchanged: `api.player`, `api.viz`, `api.library`, `api.settings`, `api.ui.addView`, `api.audio`, `api.toast` and `api.id`. Spec 2.0 adds:
+Everything from spec 1 is unchanged: `api.player`, `api.viz`, `api.library`, `api.settings`, `api.ui.addView`, `api.audio`, `api.toast` and `api.id`.
+
+**`api.ui.openExternal(url)`** opens an `https://` link in the user's browser (a sign-in page, for example).
+
+**`api.secrets`** is for every plugin and spec 1 extension: `get(name)`, `set(name, value)` (an empty value deletes), `delete(name)`, plus `secure` and `where`. It holds any secret (a password, a token, an API key, a client certificate, a session cookie) in the OS credential store, or in app storage where there is none. It is scoped to the plugin's id. **Anything secret goes here, never in `api.settings`.** See [SECRETS.md](SECRETS.md).
+
+Spec 2.0 adds:
 | | |
 |---|---|
 | `api.net.fetch(url, init)` | `fetch` that, on the desktop, goes through the Tauri HTTP plugin (no CORS limits), as source plugins use |
@@ -143,14 +151,15 @@ Everything from spec 1 is unchanged: `api.player`, `api.viz`, `api.library`, `ap
 | `api.sources.register(source)` | registers a source plugin (the existing contract) for as long as this plugin runs |
 | `api.sources.attach(sourceId, config, { title, transient })` | adds a connection to the current library. A `transient` connection appears while it is present (a disc in the drive) and is not saved. Notes and ratings are keyed by item id as usual, so they come back when the same disc is inserted again |
 | `api.outputs.register(output)` | the existing output contract |
-| `api.metadata.register(provider)` | a **metadata provider**: `{ id, name, lookup(query, { signal }) → Candidate[] }`. `query.kind` is one of `disc` (TOC / disc ids), `album`, `recording`. A Candidate's facts feed the album-details merge (`src/lib/album-details.js`) with the provider as their source chip, and are offered to the tag editor |
+| `api.metadata.lookup(query)` → `{ candidates, errors }`, `api.metadata.providers` | ask every registered provider (as the album pane does), for a plugin that needs titles, like the Record plugin |
+| `api.metadata.register(provider) → unregister` | a **metadata provider** (call `unregister` in `stop()`): `{ id, name, lookup(query, { signal }) → Candidate[] }`, shapes in `src/lib/metadata.js`. Lookups only happen when the user asks (*Find details online…*); the release they pick is remembered per album. `query.kind` is one of `disc` (TOC / disc ids), `album`, `recording`. A Candidate's facts feed the album-details merge (`src/lib/album-details.js`) with the provider as their source chip, and are offered to the tag editor |
 | `api.media.url(streamId)` | a URL `<audio>` can play for a stream the native side registered |
 | `api.library.import(paths, { provenance, notes, tags, defects })` | adds files the plugin wrote (inside a library folder) to the library at once, without waiting for a rescan, together with their provenance, notes and tags. `defects` is described under *Defects* below |
 | `api.dialog.folder({ title })` | the desktop folder picker. The picked folder is added to the file scope |
 | `api.devices.register(handler)` | a **device handler** for a kind of portable player (§6.1) |
 | `api.transcode(src, dest, target, { onProgress, signal })` | the core's `Transcode` (§5.3) from JS. Desktop only |
 
-| `api.library.annotate(path, { tags, notes, provenance, defects })` | adds annotations to a recording that is already in the library: tags are added to its tags, notes are appended, and defects replace whatever this plugin set before. Notes a plugin writes are marked with its id, so the user can see where they came from and the plugin can replace its own notes on a re-check without touching the user's |
+| `api.library.annotate(path, { tags, removeTags, notes, provenance, defects })` | adds annotations to a recording that is already in the library: tags are added to its tags (and `removeTags` taken off, for a re-check that no longer finds something), notes are appended, and defects replace whatever this plugin set before. Notes a plugin writes are marked with its id, so the user can see where they came from and the plugin can replace its own notes on a re-check without touching the user's |
 
 **Defects** are a new library annotation for recordings with known damage: a damaged CD rip today, and later a tape transfer with dropouts or a download that was cut short. Each one is `{ start, end, kind, confidence, detail }`, with times in seconds, and `kind` one of:
 - `unreadable`: the audio there could not be read
@@ -194,7 +203,7 @@ api.devices.register({
 
 ## 7. Testing contract
 Every native plugin must ship:
-1. **A simulator backend** (`sim`) that implements the full trait from fixture files and can inject faults. It is always compiled, runs in CI on all three OSes, and is what the `experimental` status rests on.
+1. **A simulator backend** (`sim`) that implements the full trait from fixture files and can inject faults. It is always compiled, runs in CI on all three OSes, and is what the `experimental` status rests on. A plugin with no platform-specific code (no backend trait, such as the library checker, which only reads files) needs no simulator: its tests run on generated files instead.
 2. **Rust tests** of the cross-platform logic against `sim` (`cargo test -p bootleg-plugin-<id>`).
 3. **JS tests** (`plugins/<id>/*.test.mjs`) using a mocked `api.native`, plus a scenario in the desktop self-test (`BOOTLEG_SELFTEST_PLUGIN=<id>`) that runs the real app against the sim backend (selected with `BOOTLEG_<ID>_BACKEND=sim`).
 4. **A hardware log** in the plugin's doc: one row per real check, giving device, OS, backend, date and result. A target becomes `supported` only once it has one.
@@ -219,6 +228,7 @@ A plugin can ship a separate per-platform program that the app runs, instead of 
 ```
 - **Protocol:** JSON lines over stdin/stdout. The app sends `{ "id", "cmd", "args" }`; the helper answers with `{ "id", "result" }` or `{ "id", "error" }`, and may send `{ "id", "progress", "text" }`, `{ "id", "log" }` and `{ "id", "event" }` lines in between, which map onto a Job (§5.3). stderr goes to the plugin's log. `{ "cmd": "cancel", "args": { "id" } }` cancels.
 - **JS:** `api.helper.call(cmd, args) → Promise` and `api.helper.job(cmd, args, onEvent)` (same shape as `api.native.job`). The helper is started on first use and stopped with the plugin.
+- **Secrets:** a helper never reads the keychain itself (on macOS the item belongs to the app, so the helper would trigger a prompt). The plugin's JS passes it what it needs in `args`, from `api.secrets`.
 - **Licence:** a helper may be LGPL (or any licence that allows distributing it beside MIT software) if its source and licence ship with it and it is listed in `THIRD_PARTY.md`. GPL is still out.
 - **Signing:** a helper that ships inside the app bundle is signed with it. A helper installed separately must be signed on macOS, or the user has to approve it once; the plugin's doc says which applies.
 - **Testing:** the testing contract (§7) applies; the helper's simulator mode is selected with `--sim <fixtures>`.

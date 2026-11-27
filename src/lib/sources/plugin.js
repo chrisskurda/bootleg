@@ -11,6 +11,8 @@
 //
 //     async connect(values)  → { config, title }        // validate against the service. `config` is what we persist: it must NOT
 //                                                         //   contain the plain password (derive tokens/keys); `title` names the connection.
+//     secrets: ['token']                                  // config fields that are secret: the app keeps them in the OS keychain
+//                                                         //   (src/lib/secrets.js) and hands them back in `session(config)`
 //     session(config)        → session                  // rebuild a session from stored config WITHOUT any network call (offline start)
 //     async *scan(session, { signal })  → yields { items: Item[], progress: 'text' }   // pages of tracks; the app shows progress
 //     streamUrl(session, item)   → URL string           // what <audio> plays

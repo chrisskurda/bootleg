@@ -1,0 +1,16 @@
+{
+  "spec": "2.0",
+  "id": "checker",
+  "name": "Library check",
+  "version": "0.1.0",
+  "description": "Checks the files you have: damage, files cut short, FLAC checksums, lossy files saved as lossless, upsampling, padded bit depth, clipping and dynamic range, and AccurateRip for CD rips without the disc. Findings go onto the tracks as tags, notes and ⚠ marks.",
+  "entry": "index.js",
+  "provides": ["view"],
+  "platforms": {
+    "macos":   { "status": "experimental", "arch": ["aarch64", "x86_64"] },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "unavailable", "why": "It reads files directly, which a browser can't do." }
+  },
+  "native": { "crate": "native", "feature": "plugin-checker" }
+}

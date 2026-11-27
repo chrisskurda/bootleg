@@ -5,3 +5,5 @@ src-tauri/gen/
 .DS_Store
 vendor/bootleg-vizualizer/cache/
 cache/
+plugins/*/native/target/
+src-tauri/plugin-api/target/

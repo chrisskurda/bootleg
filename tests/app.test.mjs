@@ -259,6 +259,20 @@ try {
   const facts = await ev(() => Object.fromEntries([...document.querySelectorAll('#splitPane .facts dt')].map(dt => [dt.textContent, dt.nextSibling.textContent])));
   t('split view shows merged details (artist, year, genre, tracks, format, folder) with where each came from', /2027/.test(facts.Year) && /Funk/.test(facts.Genre) && /FLAC/.test(facts.Format) && /Tracks/.test(Object.keys(facts).join()) && !!facts.Folder, JSON.stringify(facts).slice(0, 220));
   t('…including text from the album.nfo, labelled with its source', (await pg.locator('#splitPane').innerText()).includes('never fixed') && (await pg.locator('#splitPane .chip.src', { hasText: '.nfo' }).count()) >= 1);
+  // a metadata provider plugin (MusicBrainz, mocked): look the album up, pick the release, its facts join the details, the tag editor can fill from it
+  const mbRel = { id: 'rel-1', score: 100, title: 'Basement Sessions', date: '2027-03-01', country: 'XW', 'artist-credit': [{ name: 'The Quarterlies' }], 'label-info': [{ 'catalog-number': 'BSMT-01', label: { name: 'Cellar Records' } }], 'release-group': { id: 'rg', 'primary-type': 'Album' }, media: [{ position: 1, format: 'Digital Media', 'track-count': 1, tracks: [] }] };
+  await pg.route('https://musicbrainz.org/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r.request().url().includes('/release/?query') ? { releases: [mbRel] } : mbRel) }));
+  await ev(async () => { const x = window.__bootleg.extensions; x.confirm('musicbrainz'); await x.setEnabled('musicbrainz', true); }); await pg.waitForFunction(() => window.__bootleg.listProviders().some(p => p.id === 'musicbrainz'));
+  await pg.locator('#splitList .srow2', { hasText: 'Basement Sessions' }).click(); await pg.click('#splitPane .mdrow button:has-text("Find details online")'); await pg.waitForSelector('#splitPane .mdcand');
+  t('looking an album up lists candidate releases with a match score', /Cellar Records/.test(await pg.locator('#splitPane .mdcand').first().innerText()) && /% match/.test(await pg.locator('#splitPane .mdcand').first().innerText()));
+  await pg.click('#splitPane .mdcand button:has-text("This one")'); await pg.waitForFunction(() => [...document.querySelectorAll('#splitPane .facts dt')].some(d => d.textContent === 'Label'));
+  const mbFacts = await ev(() => Object.fromEntries([...document.querySelectorAll('#splitPane .facts dt')].map(dt => [dt.textContent, dt.nextSibling.textContent])));
+  t('the chosen release adds facts the files did not have, with MusicBrainz as their source, and is remembered', /Cellar Records.*musicbrainz/.test(mbFacts.Label) && /BSMT-01/.test(mbFacts['Catalog no.']) && /^2027(\.nfo|tags)$/.test(mbFacts.Year) && !!(await ev(() => window.__bootleg.metaChosen.get('album:The Quarterlies|Basement Sessions')))?.id, JSON.stringify(mbFacts));
+  await pg.click('#splitPane button:has-text("Edit album")'); await pg.click('.tagdlg button:has-text("Fill in from MusicBrainz")');
+  t('the tag editor fills album fields from the chosen release, to check before saving', (await pg.locator('.tagdlg input[name=album].suggested').inputValue()) === 'Basement Sessions');
+  await pg.click('.tagdlg button:has-text("Cancel")'); await pg.click('#splitPane .mdrow button:has-text("forget")'); await pg.waitForSelector('#splitPane .mdrow button:has-text("Find details online")');
+  await ev(() => window.__bootleg.extensions.setEnabled('musicbrainz', false)); await pg.unroute('https://musicbrainz.org/**');
+  t('turning the plugin off removes the lookup', await pg.waitForFunction(() => !document.querySelector('#splitPane .mdrow') || !window.__bootleg.listProviders().length).then(() => true, () => false));
   await pg.locator('#splitPane .stars .star').nth(2).click({ position: { x: 14, y: 8 } }); await pg.fill('#albumNoteText', 'great live feel'); await pg.click('#splitPane .cbtns .btn.primary:has-text("Add note")'); await pg.waitForSelector('#splitPane .note');
   t('album-level rating and notes are saved under the album', await ev(async () => (await window.__bootleg.notes.store.export()).tracks.some(x => x.key === 'album:The Quarterlies|Basement Sessions' && x.rating === 3 && x.notes.length === 1)));
   await pg.click('.nav[data-view="notes"]'); await pg.waitForSelector('#noteCards .ncard'); t('album notes appear in the Notes view under the album name', (await pg.locator('#noteCards').innerText()).includes('Basement Sessions') && (await pg.locator('#noteCards .chip', { hasText: 'album' }).count()) >= 1);
@@ -294,6 +308,16 @@ try {
   t('…and sits between the player and the speakers', (await ev(() => window.__bootleg.player.inserts.length)) === 1);
   await pg.click('.nav[data-view="settings"]'); await eqRow().locator('input').uncheck(); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('equalizer'));
   t('turning it off removes its page and its processing', (await pg.locator('#extNav .nav').count()) === 0 && (await pg.locator('#extNav').isHidden()) && (await ev(() => window.__bootleg.player.inserts.length)) === 0);
+  // ---- a spec 2 plugin with a secret setting: the scrobbler (the services are mocked; nothing leaves the machine)
+  const lbHits = []; await pg.route('https://api.listenbrainz.org/**', r => { lbHits.push(r.request().headers().authorization); r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ valid: true, user_name: 'tester' }) }); });
+  const scRow = () => pg.locator('#settingsBody .srow', { hasText: 'Scrobbling' }).first();
+  await scRow().locator('input[type=checkbox]').click(); await pg.locator('.pconfirm button', { hasText: 'Turn on' }).click(); await pg.waitForFunction(() => window.__bootleg.extensions.running.has('scrobble'), null, { timeout: 8000 });
+  t('the scrobbler is experimental, so it asks first, then adds its page', await pg.locator('#extNav .nav:has-text("Scrobbling")').isVisible());
+  const tokIn = pg.locator('#settingsBody .srow', { hasText: 'ListenBrainz user token' }).locator('input[type=password]');
+  await tokIn.fill('my-lb-token'); await tokIn.dispatchEvent('change'); await pg.waitForFunction(() => /tester/.test(window.__bootleg.extensions.status('scrobble')), null, { timeout: 8000 });
+  t('a secret setting goes to the secret store, not the plugin settings, and the field does not show it again', (await ev(() => localStorage.getItem('bootleg.secrets'))).includes('plugin/scrobble/listenbrainzToken') && !(await ev(() => Object.keys(localStorage).filter(k => k.startsWith('bootleg.ext.scrobble')).map(k => localStorage.getItem(k)).join(''))).includes('my-lb-token') && (await tokIn.inputValue()) === '' && /saved/.test(await tokIn.getAttribute('placeholder')));
+  t('…and the plugin restarted with it and signed in', lbHits.includes('Token my-lb-token'));
+  await ev(() => window.__bootleg.extensions.setEnabled('scrobble', false)); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('scrobble'));      // (Settings repaints as the plugin restarts, so not by clicking) await pg.unroute('https://api.listenbrainz.org/**');
   await ev(() => window.__bootleg.player.setVolume(0.9));
 
   // ---- progress while importing a big folder
@@ -367,7 +391,8 @@ try {
   await pg.waitForSelector('dialog.tagdlg[open]'); t('the album editor offers only the shared fields', (await pg.locator('dialog.tagdlg input[name=title]').count()) === 0);
   await pg.fill('dialog.tagdlg input[name=year]', '1999'); await pg.click('dialog.tagdlg button[type=submit]'); await pg.waitForFunction(() => window.__bootleg.lib.tracks.filter(x => x.album === 'Cloud Album').every(x => +x.year === 1999));
   t('an album edit applies to every track of the album', true); await pg.click('#albumMode button[data-mode="grid"]');
-  t('the password is never stored (only a salted token)', !(await ev(() => localStorage.getItem('bootleg.libraries'))).includes('secret') && /"token":"[0-9a-f]{32}"/.test(await ev(() => localStorage.getItem('bootleg.libraries'))));
+  t('the password is never stored (only a salted token)', !(await ev(() => localStorage.getItem('bootleg.libraries') + localStorage.getItem('bootleg.secrets'))).includes('secret') && /"token\\?":\\?"[0-9a-f]{32}/.test(await ev(() => localStorage.getItem('bootleg.secrets'))));
+  t('the token is kept apart from the library settings (app storage in a browser, the keychain on the desktop)', !(await ev(() => localStorage.getItem('bootleg.libraries'))).includes('token') && (await ev(() => window.__bootleg.secrets.where)).includes('app storage'));
   await pg.click('.nav[data-view="tracks"]'); await pg.waitForSelector('#trackList .row'); await pg.locator('#trackList .row', { hasText: 'Remote One' }).dblclick(); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.5, null, { timeout: 20000 });
   const pk = await ev(async () => { let m = 0; for (let i = 0; i < 20; i++) { m = Math.max(m, ...window.__bootleg.feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } return m; });
   t('a server track plays and the visualizer hears it (CORS-clean analyser)', pk > 0.2, 'peak ' + pk.toFixed(2));
@@ -432,5 +457,5 @@ try {
   ss.close();
   const realErrs = errs.filter(e => !/status of 500.*stream\.view/.test(e));      // the deliberate failing stream above
   t('no console or page errors', realErrs.length === 0, realErrs.slice(0, 3).join(' | '));
-} catch (e) { t('test run completed without throwing', false, String(e.message).split('\n')[0]); if (shots) await pg.screenshot({ path: path.join(shots, 'failure.png') }).catch(() => {}); }
+} catch (e) { t('test run completed without throwing', false, String(e.message).split('\n')[0] + ' @ ' + (String(e.stack).match(/app\.test\.mjs:(\d+)/) || [])[1]); if (shots) await pg.screenshot({ path: path.join(shots, 'failure.png') }).catch(() => {}); }
 await finish();

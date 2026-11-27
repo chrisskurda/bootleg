@@ -1,5 +1,6 @@
 // The split view's right-hand pane: cover, merged details, album-level rating/tags/notes, review text, tracks.
 import { albumFacts, albumKey } from './album-details.js';
+import { albumQuery, extraFacts, tagSuggestion } from './metadata.js';
 import { MODES, STATUSES } from './libraries.js';
 import { stars } from './notes-ui.js';
 import { plural } from './controls.js';
@@ -7,9 +8,11 @@ import { plural } from './controls.js';
 const drafts = new Map();     // unsent note text survives the pane repainting after a rating/tag change
 const SRC_LABEL = { tags: 'tags', nfo: '.nfo', server: 'server', files: 'files', library: 'library', bootleg: 'bootleg' };
 
-export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, cover, trackStore, editTags = null, acts = { now: (l, i = 0) => player.playList(l, i), activate: (l, i = 0) => player.playList(l, i) } }) {
+// `meta`: metadata providers ({ providers(), chosen: Chosen, lookup(query), open(url), repaint() }), or null.
+export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, cover, trackStore, editTags = null, meta = null, acts = { now: (l, i = 0) => player.playList(l, i), activate: (l, i = 0) => player.playList(l, i) } }) {
   const key = albumKey(a), rec = await store.get(key), mode = MODES[libs.modeOf(a.tracks[0])] || MODES.listening;
-  const { facts, text } = albumFacts(a, { libraryName: id => libs.get(id)?.name || '' });
+  const chosen = meta ? await meta.chosen.get(key) : null;
+  const { facts, text } = albumFacts(a, { libraryName: id => libs.get(id)?.name || '', extra: extraFacts(chosen) });
   const hms = s => { s = Math.round(s); const hh = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return hh ? `${hh} h ${m} min` : `${m} min`; };
   const ta = h('textarea', { rows: 2, id: 'albumNoteText', placeholder: 'A note about this album — what to remember, how it came to be…  (Cmd/Ctrl+Enter to add)' }), kind = h('select', { id: 'albumNoteKind' }, ...mode.noteKinds.map(([k, l]) => h('option', { value: k }, l)));
   ta.value = drafts.get(key) || ''; ta.oninput = () => drafts.set(key, ta.value);
@@ -18,10 +21,11 @@ export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, co
   const rated = await Promise.all(a.tracks.map(t => trackStore(t)));
 
   return h('div', { class: 'apane' },
-    h('div', { class: 'ahead' }, cover(a.coverUrl, 'cover xl'), h('div', { class: 'agrow' }, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, facts.find(f => f.label === 'Year')?.value, plural(a.tracks.length, 'track'), a.tracks.some(t => t.duration) ? hms(a.tracks.reduce((n, t) => n + (t.duration || 0), 0)) : ''].filter(Boolean).join(' · ')),
+    h('div', { class: 'ahead' }, cover(a.coverUrl || chosen?.cover, 'cover xl'), h('div', { class: 'agrow' }, h('div', { class: 'big' }, a.album), h('div', { class: 'muted' }, [a.artist, facts.find(f => f.label === 'Year')?.value, plural(a.tracks.length, 'track'), a.tracks.some(t => t.duration) ? hms(a.tracks.reduce((n, t) => n + (t.duration || 0), 0)) : ''].filter(Boolean).join(' · ')),
       h('div', { class: 'arate' }, stars(h, rec.rating, v => store.setRating(key, v)), mode.status ? h('select', { 'aria-label': 'Status', onchange: e => store.setStatus(key, e.target.value) }, h('option', { value: '' }, 'status…'), ...STATUSES.map(x => h('option', { value: x, selected: x === rec.status }, x))) : ''),
-      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play'), h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'), editTags ? h('button', { class: 'btn', onclick: () => editTags(a.tracks, `Edit album — ${a.album}`) }, '✎ Edit album') : ''))),
+      h('div', { class: 'cbtns' }, h('button', { class: 'btn primary', onclick: () => acts.now(a.tracks) }, '▶ Play'), h('button', { class: 'btn', onclick: () => acts.now(a.tracks.slice().sort(() => Math.random() - 0.5)) }, 'Shuffle'), h('button', { class: 'btn', onclick: () => { player.enqueue(a.tracks); toast(`Queued ${plural(a.tracks.length, 'track')}`); } }, '+ Queue'), editTags ? h('button', { class: 'btn', onclick: () => editTags(a.tracks, `Edit album — ${a.album}`, tagSuggestion(chosen)) }, '✎ Edit album') : ''))),
     h('h4', {}, 'Details ', h('span', { class: 'muted small' }, 'merged from everything we know — the chip says where each fact came from')),
+    meta && (chosen || meta.providers().length) ? lookupRow(a, key, chosen, meta, h) : '',
     h('dl', { class: 'facts' }, ...facts.flatMap(f => [h('dt', {}, f.label), h('dd', {}, h('span', {}, f.value), h('span', { class: 'chip src' }, SRC_LABEL[f.source] || f.source))])),
     ...text.map(x => h('div', {}, h('h4', {}, x.label, ' ', h('span', { class: 'chip src' }, x.source)), h('div', { class: 'nfotext' }, x.text))),
     h('h4', {}, 'Your notes on this album'),
@@ -32,4 +36,25 @@ export async function albumPane(a, { libs, lib, store, player, h, fmt, toast, co
     h('div', { class: 'atracks' }, ...a.tracks.map((t, i) => h('div', { class: 'atrack' + (player.item?.id === t.id ? ' playing' : ''), ondblclick: () => acts.activate(a.tracks, i, true) },
       h('span', { class: 'n' }, String(t.track || i + 1)), h('span', { class: 'tt' }, t.title, rated[i].rating ? h('span', { class: 'mini-stars' }, ' ' + '★'.repeat(Math.floor(rated[i].rating)) + (rated[i].rating % 1 ? '½' : '')) : ''), h('span', { class: 'muted' }, t.artist && t.artist !== a.artist ? t.artist : ''), h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''),
       h('span', { class: 'acts' }, h('button', { class: 'mini', onclick: () => acts.now(a.tracks, i, true) }, '▶'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue'))))));
+}
+
+// "Find details online": ask the metadata providers, let the user pick the right release, remember it for this album.
+function lookupRow(a, key, chosen, meta, h) {
+  const row = h('div', { class: 'mdrow' });
+  const find = async () => {
+    row.replaceChildren(h('span', { class: 'muted small' }, 'Looking it up…'));
+    const { candidates, errors } = await meta.lookup(albumQuery(a));
+    row.replaceChildren(
+      ...errors.map(e => h('div', { class: 'err small' }, `${e.provider}: ${e.message}`)),
+      candidates.length ? h('div', { class: 'muted small' }, 'Which one is this? The best match is first.') : h('div', { class: 'muted small' }, 'Nothing found.'),
+      h('div', { class: 'mdcands' }, ...candidates.slice(0, 8).map(c => h('div', { class: 'mdcand' },
+        c.cover ? h('img', { class: 'cover', src: c.cover, alt: '', loading: 'lazy' }) : h('div', { class: 'cover ph' }, '♪'),
+        h('div', { class: 'agrow' }, h('b', {}, c.title), ' ', h('span', { class: 'muted' }, c.artist), h('div', { class: 'muted small' }, [c.summary, `${Math.round((c.score || 0) * 100)}% match`, c.providerName].filter(Boolean).join(' · '))),
+        h('span', { class: 'cbtns' }, c.url ? h('button', { class: 'link', onclick: () => meta.open(c.url) }, 'open') : '', h('button', { class: 'btn', onclick: async () => { await meta.chosen.set(key, c); meta.repaint(); } }, 'This one'))))),
+      h('button', { class: 'link', onclick: () => meta.repaint() }, 'Cancel'));
+  };
+  if (chosen) row.append(h('span', { class: 'chip src' }, chosen.providerName || chosen.provider), ' ', h('span', {}, chosen.title, chosen.summary ? h('span', { class: 'muted small' }, ' · ' + chosen.summary) : ''), ' ',
+    chosen.url ? h('button', { class: 'link', onclick: () => meta.open(chosen.url) }, 'open') : '', ' ', meta.providers().length ? h('button', { class: 'link', onclick: find }, 'change') : '', ' ', h('button', { class: 'link', onclick: async () => { await meta.chosen.set(key, null); meta.repaint(); } }, 'forget'));
+  else row.append(h('button', { class: 'btn', onclick: find }, 'Find details online…'), ' ', h('span', { class: 'muted small' }, meta.providers().map(p => p.name).join(', ')));
+  return row;
 }

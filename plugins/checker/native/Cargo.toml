@@ -1,0 +1,32 @@
+[package]
+name = "bootleg-plugin-checker"
+version = "0.1.0"
+description = "bootleg library checker: decode checks, FLAC MD5, fake-lossless / upsampling / padded-bits detection, clipping and DR, AccurateRip for existing rips (plugin spec 2.0)"
+license = "MIT"
+edition = "2021"
+publish = false
+links = "bootleg-checker"
+
+[features]
+# The Tauri glue (commands, jobs). The engine builds and tests without it.
+tauri = ["dep:tauri", "dep:bootleg-plugin-api", "dep:ureq", "dep:tauri-plugin"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+claxon = "0.4"
+md-5 = "0.10"
+rustfft = "6"
+# MPL-2.0 (file-level copyleft: fine beside MIT; no GPL). Decodes everything but FLAC, which claxon does exactly.
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "wav", "aiff", "pcm", "ogg", "vorbis", "flac"] }
+# The CD plugin's TOC and AccurateRip code (no Tauri, no drive code is used).
+bootleg-plugin-cd = { path = "../../cd/native" }
+tauri = { version = "2", optional = true }
+bootleg-plugin-api = { path = "../../../src-tauri/plugin-api", optional = true }
+ureq = { version = "2", default-features = false, optional = true }
+
+[dev-dependencies]
+flacenc = "0.5"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"], optional = true }

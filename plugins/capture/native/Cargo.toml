@@ -1,0 +1,27 @@
+[package]
+name = "bootleg-plugin-capture"
+version = "0.1.0"
+description = "bootleg capture plugin: record vinyl and tape from an audio interface, split into tracks at the silences, remove clicks, FLAC with tags (plugin spec 2.0)"
+license = "MIT"
+edition = "2021"
+publish = false
+links = "bootleg-capture"
+
+[features]
+tauri = ["dep:tauri", "dep:bootleg-plugin-api", "dep:tauri-plugin", "dep:serde_json"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+flacenc = "0.5"
+lofty = "0.22"
+# Apache-2.0: audio input on macOS (CoreAudio), Windows (WASAPI) and Linux (ALSA).
+cpal = "0.15"
+tauri = { version = "2", optional = true }
+bootleg-plugin-api = { path = "../../../src-tauri/plugin-api", optional = true }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"], optional = true }
+
+[dev-dependencies]
+claxon = "0.4"

@@ -1,0 +1,16 @@
+{
+  "spec": "2.0",
+  "id": "capture",
+  "name": "Record",
+  "version": "0.1.0",
+  "description": "Records vinyl and tape from an audio input: level meters, the tracks found at the quiet gaps (adjust the splits on the waveform), titles typed or filled in from MusicBrainz, clicks removed, and 24-bit FLAC saved into the library with where it came from.",
+  "entry": "index.js",
+  "provides": ["view"],
+  "platforms": {
+    "macos":   { "status": "experimental", "arch": ["aarch64", "x86_64"] },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "unavailable", "why": "Recording to files needs the desktop app." }
+  },
+  "native": { "crate": "native", "feature": "plugin-capture" }
+}

@@ -1,0 +1,22 @@
+{
+  "spec": "2.0",
+  "id": "scrobble",
+  "name": "Scrobbling",
+  "version": "0.1.0",
+  "description": "Sends what you listen to to ListenBrainz and Last.fm. A track counts after half of it (or 4 minutes) has really been heard. Plays made offline are kept and sent later.",
+  "entry": "index.js",
+  "provides": ["view"],
+  "settings": [
+    { "key": "listenbrainzToken", "label": "ListenBrainz user token", "type": "secret", "hint": "From listenbrainz.org → Settings → User token." },
+    { "key": "lastfmKey", "label": "Last.fm API key", "type": "secret", "hint": "Your own API account (last.fm/api/account/create) until bootleg has one. Then sign in on the Scrobbling page." },
+    { "key": "lastfmSecret", "label": "Last.fm shared secret", "type": "secret", "hint": "Shown with the API key." },
+    { "key": "nowPlaying", "label": "Show what's playing now", "type": "bool", "default": true, "hint": "Tell the services about a track as it starts, not only once it counts." },
+    { "key": "stems", "label": "Scrobble stem sets", "type": "bool", "default": false, "hint": "Stem sets are often your own work in progress, so they are left out unless you choose otherwise." }
+  ],
+  "platforms": {
+    "macos":   { "status": "experimental" },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "experimental" }
+  }
+}
