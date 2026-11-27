@@ -144,7 +144,7 @@ body.drop::after { content: "Drop music or a folder to add it"; position: fixed;
 /* notes, ratings, playlists */
 .stars { display: inline-flex; } .star { background: none; border: 0; padding: 0 1px; font-size: 16px; line-height: 1; color: #39405c; cursor: pointer; position: relative; }
 .star.full { color: #ffc857; } .star.half { color: transparent; background: linear-gradient(90deg, #ffc857 50%, #39405c 50%); -webkit-background-clip: text; background-clip: text; } .star:hover { color: #ffd98a; }
-.np { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .npl { display: flex; gap: 10px; align-items: center; cursor: pointer; min-width: 0; } #npStars .star { font-size: 13px; }
+.np { display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; } .npl { display: flex; gap: 10px; align-items: center; cursor: pointer; min-width: 0; } #npStars .star { font-size: 13px; }
 .seekwrap { position: relative; flex: 1; display: flex; align-items: center; } .seekwrap input { width: 100%; }
 .marks { position: absolute; left: 0; right: 0; bottom: -2px; height: 6px; pointer-events: none; } .mark { position: absolute; pointer-events: auto; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--accent2); border: 0; padding: 0; cursor: pointer; }
 .mark.range { border-radius: 2px; height: 4px; margin-left: 0; background: #ff5fd288; }
