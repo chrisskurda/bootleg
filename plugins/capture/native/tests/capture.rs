@@ -54,7 +54,7 @@ fn record_a_side_from_the_simulated_turntable_and_save_its_tracks() {
     let out = d.join("Library"); let req = SaveRequest { recording: raw.to_string_lossy().into(), dest: out.to_string_lossy().into(), album: "Side A".into(), album_artist: "The Band".into(), year: "1977".into(), tracks, device: "Sim deck".into(), ..Default::default() };
     let saved = save(&req, &mut |_, _| {}, &|| false).unwrap();
     assert_eq!(saved.len(), 3); let total: usize = saved.iter().map(|s| s.clicks).sum(); assert!(total >= n_clicks, "clicks repaired {total} (added {n_clicks}, both channels)");
-    let f = &saved[1]; assert!(f.path.ends_with("The Band/Side A/02 Song 2.flac"), "{}", f.path);
+    let f = &saved[1]; assert!(std::path::Path::new(&f.path).ends_with("The Band/Side A/02 Song 2.flac"), "{}", f.path);      // (by components: \ on Windows)
     let fr = claxon::FlacReader::open(&f.path).unwrap(); assert_eq!((fr.streaminfo().bits_per_sample, fr.streaminfo().sample_rate), (24, 44_100));
     use lofty::{prelude::*, probe::Probe}; let tf = Probe::open(&f.path).unwrap().read().unwrap(); let t = tf.primary_tag().unwrap();
     assert_eq!(t.title().as_deref(), Some("Song 2")); assert_eq!(t.artist().as_deref(), Some("The Band")); assert!(t.comment().unwrap().contains("vinyl (Sim deck)"));
