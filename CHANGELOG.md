@@ -78,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - **Jazz Cup** visualizer pack (vendored from bootleg-vizualizer): a 90s paper-cup pattern that dances with the music.
+- **18 more visualizer packs** (bootleg-vizualizer 0.10.0): seven built from the playing track's cover art (Ambient, Gallery, Glitch, Mirror, Mosaic, Shards, Strips), ten retro computer screens (Amiga, Apple II, BeOS, DOS Shell, Hackerman, Mono Mac, Matrix, Metro, Palm, Temple) and Hot Dog Stand.
 
 ## [0.3.0] - 2026-11-25
 
