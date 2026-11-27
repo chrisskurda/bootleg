@@ -98,9 +98,15 @@ const titleOfKey = k => { const p = String(k || '').replace(/^(file|render):/, '
  * is not added again). Keys bootleg doesn't know (files it did not put there) are counted, not stored.
  */
 export async function mergeOutbox(store, files, { known = () => true } = {}) {
-  const r = { plays: 0, ratings: 0, notes: 0, tags: 0, unknown: 0, older: 0 };
+  const r = { plays: 0, ratings: 0, notes: 0, tags: 0, playlists: 0, unknown: 0, older: 0 };
   const events = files.flatMap(f => f.events).sort((a, b) => a.ts - b.ts);
   for (const e of events) {
+    // a playlist made on the player (bootleg-pod): saved under a stable id per name, so saving it again there updates it here
+    if (e.type === 'playlist') {
+      const name = clean(e.name);
+      if (name && Array.isArray(e.tracks)) { await store.savePlaylist({ id: 'player:' + name.toLowerCase(), name, items: e.tracks.filter(k => typeof k === 'string' && known(k)) }); r.playlists++; }
+      continue;
+    }
     const key = e.track;
     if (!key || !known(key)) { r.unknown++; continue; }
     const rec = await store.get(key);
@@ -110,7 +116,8 @@ export async function mergeOutbox(store, files, { known = () => true } = {}) {
         if (e.ts > (rec.updated || 0)) { await store.setRating(key, +e.stars || 0); r.ratings++; } else r.older++;
         break;
       case 'tags':
-        if (Array.isArray(e.tags)) { await store.setTags(key, [...(rec.tags || []), ...e.tags]); r.tags++; }
+        // `remove` takes tags off (a star removed on the player); older players only ever add
+        if (Array.isArray(e.tags) || Array.isArray(e.remove)) { const off = new Set(e.remove || []); await store.setTags(key, [...(rec.tags || []).filter(x => !off.has(x)), ...(e.tags || [])]); r.tags++; }
         break;
       case 'note': {
         const at = e.at ?? null, to = e.to ?? null, text = clean(e.text);

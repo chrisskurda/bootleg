@@ -50,12 +50,19 @@ const files = [{ file: 'x', events: [
   { ts: before + 4000, track: k, type: 'play', seconds: 200, complete: true },
   { ts: before + 5000, track: 'file:Music/mine.mp3', type: 'rating', stars: 5 },
   { ts: before + 6000, track: k, type: 'brand-new-thing' },
+  { ts: before + 7000, track: k, type: 'tags', tags: ['starred'] },
+  { ts: before + 8000, track: k, type: 'tags', tags: [], remove: ['starred'] },
+  { ts: before + 9000, track: 'file:Music/bootleg/Playlists/Night.m3u8', type: 'playlist', name: 'Night', tracks: [k, 'file:Music/mine.mp3'] },
+  { ts: before + 9500, track: 'file:Music/bootleg/Playlists/Night.m3u8', type: 'playlist', name: 'night', tracks: [k] },
 ] }];
 const r = await mergeOutbox(store, files, { known: key => byKey.has(key) });
 const rec = await store.get(k);
 t('outbox: newer rating wins, older is ignored', rec.rating === 4.5 && r.ratings === 1 && r.older === 1, JSON.stringify(r));
 t('outbox: a note is added once', rec.notes.length === 1 && rec.notes[0].at === 190 && r.notes === 1);
 t('outbox: tags added, plays counted, unknown files not stored', rec.tags.includes('road') && r.plays === 1 && r.unknown === 1);
+t('outbox: a tag can come off again (star removed on the player)', !rec.tags.includes('starred') && rec.tags.includes('road'));
+const pls = await store.playlists();
+t('outbox: a playlist made on the player is saved once per name, with the tracks bootleg knows', pls.length === 1 && pls[0].id === 'player:night' && pls[0].items.length === 1 && pls[0].items[0] === k && r.playlists === 2, JSON.stringify(pls));
 const doc = await notesFor(store, [k]);
 t('notes.json holds only the card\'s tracks', doc.format === 'bootleg-notes' && doc.tracks.length === 1 && doc.tracks[0].key === k);
 

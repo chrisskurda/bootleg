@@ -42,7 +42,7 @@ export function initDevices({ root, h, lib, notes, keyOf, toast, store, plural, 
     const all = new Set([...lib.tracks, ...lib.renders].map(keyOf));
     const r = await mergeOutbox(notes, files, { known: k => all.has(k) });
     await invoke('device_outbox_ack', { volume: m.volume, files: files.map(f => f.file) });
-    const bits = [r.ratings && plural(r.ratings, 'rating'), r.notes && plural(r.notes, 'note'), r.tags && plural(r.tags, 'tag change'), r.plays && plural(r.plays, 'play')].filter(Boolean);
+    const bits = [r.ratings && plural(r.ratings, 'rating'), r.notes && plural(r.notes, 'note'), r.tags && plural(r.tags, 'tag change'), r.playlists && plural(r.playlists, 'playlist'), r.plays && plural(r.plays, 'play')].filter(Boolean);
     if (!quiet || bits.length) toast(`From ${m.name}: ${bits.join(', ') || 'nothing that applies here'}${r.unknown ? ` (${r.unknown} for files bootleg didn’t put there)` : ''}`);
     return r;
   }

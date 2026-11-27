@@ -1,16 +1,16 @@
 {
   "id": "bridge-thing",
   "name": "Car Thing bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entry": "index.js",
-  "description": "Lets a Spotify Car Thing running the bootleg-bridge-thing app control playback and show the visualizer. Connects to the bridgething desktop app on this computer.",
+  "description": "Lets a Spotify Car Thing running the bootleg-bridge-thing app, or a bootleg-pod handheld on Wi-Fi, control playback and show what is playing. Connects to the bridgething desktop app on this computer and/or to the handheld.",
   "settings": [
     {
       "key": "url",
-      "label": "Bridge address",
+      "label": "Bridge addresses",
       "type": "text",
       "default": "ws://127.0.0.1:8899/bootleg",
-      "hint": "Where the bridgething desktop app listens."
+      "hint": "Where the bridgething desktop app listens (ws://127.0.0.1:8899/bootleg). Add a handheld by its address from its Remote page (ws://<ip>:8899/bootleg?key=\u2026), separated by a comma."
     }
   ]
 }
