@@ -14,7 +14,7 @@ pub struct Entry { pub path: String, pub size: u64, pub mtime: u64 }
 #[derive(Serialize, Clone)]
 pub struct Progress { pub dirs: usize, pub files: usize }
 
-const AUDIO: [&str; 10] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf"];
+const AUDIO: [&str; 15] = ["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "aif", "aiff", "caf", "mp4", "m4v", "mkv", "webm", "mov"];      // and music videos (src/lib/videos.js)
 fn wanted(name: &str) -> bool {
     if name == "manifest.json" || name == "clips.json" { return true; }
     match name.rsplit_once('.') { Some((_, e)) => { let e = e.to_ascii_lowercase(); e == "nfo" || e == "bstem" || e == "bsong" || e == "dawproject" || AUDIO.contains(&e.as_str()) } None => false }

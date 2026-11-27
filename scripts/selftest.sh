@@ -6,7 +6,7 @@ set -euo pipefail
 # GNU `timeout` is not on stock macOS (nor on GitHub's macOS runners): use it when there, else a small portable stand-in
 run_timeout() { local s=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$s" "$@"; else "$@" & local p=$!; ( sleep "$s"; kill "$p" 2>/dev/null ) & local k=$!; wait "$p"; local rc=$?; kill "$k" 2>/dev/null || true; return $rc; fi; }
 BIN="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; cd "$(dirname "$0")/.."
-T="$(mktemp -d)"; trap 'kill $MOCK $DLNA 2>/dev/null || true; wait $MOCK $DLNA 2>/dev/null || true; rm -rf "$T"' EXIT; mkdir -p "$T/L/A" "$T/S"
+T="$(mktemp -d)"; trap 'kill $MOCK $DLNA ${PLEX:-} 2>/dev/null || true; wait $MOCK $DLNA ${PLEX:-} 2>/dev/null || true; rm -rf "$T"' EXIT; mkdir -p "$T/L/A" "$T/S"
 mkdir -p "$T/card/Music/bootleg/Tester" && echo mine > "$T/card/Music/bootleg/Tester/mine.txt"   # a card with a file of the user's on it (device sync must leave it alone)
 ffmpeg -v error -y -f lavfi -i color=c=0xcc5533:s=200x200:d=1 -frames:v 1 "$T/c.png"
 ffmpeg -v error -y -f lavfi -i sine=frequency=330:duration=6 -i "$T/c.png" -map 0:a -map 1:v -c:a flac -c:v mjpeg -disposition:v attached_pic -metadata title="Self Test" -metadata artist=Tester "$T/L/A/st.flac"
@@ -15,6 +15,11 @@ mkdir -p "$T/P" && node --input-type=module -e "import fs from 'node:fs'; import
 for i in 1 2; do ffmpeg -v error -y -f lavfi -i sine=frequency=$((300+i*100)):duration=5 "$T/S/s$i.flac"; done
 NOCORS=1 node tests/mock-subsonic-cli.mjs "$T/S" "$T/c.png" > "$T/mock.log" & MOCK=$!
 for _ in $(seq 1 30); do grep -q 'mock:' "$T/mock.log" && break; sleep 0.2; done
+# music videos: one beside the self-test track (matched by its name), one on a mock Plex server (CORS for app.plex.tv only)
+mkdir -p "$T/V"; for f in "$T/L/A/Tester - Self Test (Official Video).mp4" "$T/V/plex.mp4"; do ffmpeg -v error -y -f lavfi -i testsrc=size=320x180:rate=25:duration=5 -f lavfi -i sine=frequency=520:duration=5 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart "$f"; done
+node tests/mock-plex.mjs "$T/S/s1.flac" "$T/V/plex.mp4" "$T/c.png" > "$T/plex.log" & PLEX=$!
+for _ in $(seq 1 30); do grep -q 'plex:' "$T/plex.log" && break; sleep 0.2; done
+export BOOTLEG_SELFTEST_PLEX="$(sed 's/plex: //' "$T/plex.log")"
 node tests/mock-dlna.mjs "$T/dlna.log" > "$T/dlna.out" & DLNA=$!
 for _ in $(seq 1 30); do grep -q 'dlna:' "$T/dlna.out" && break; sleep 0.2; done
 export BOOTLEG_SELFTEST_DLNA="$(sed 's/dlna: //' "$T/dlna.out")"
@@ -39,5 +44,7 @@ if (!(r.cd && (r.cd.ok || r.cd.skipped === "not in this build"))) bad.push("cd: 
 if (!(r.checker && (r.checker.ok || r.checker.skipped === "not in this build"))) bad.push("checker: " + JSON.stringify(r.checker));
 if (!(r.acoustid && (r.acoustid.ok || r.acoustid.skipped))) bad.push("acoustid: " + JSON.stringify(r.acoustid));
 if (!(r.capture && (r.capture.ok || r.capture.skipped))) bad.push("capture: " + JSON.stringify(r.capture));
+if (!skip && !(r.video && r.video.ok)) bad.push("video: " + JSON.stringify(r.video));
+if (!skip && !(r.plex && r.plex.ok)) bad.push("plex: " + JSON.stringify(r.plex));
 const fs = require("fs"), card = process.argv[3]; if (!(fs.readFileSync(card + "/Music/bootleg/Tester/mine.txt", "utf8").trim() === "mine" && fs.existsSync(card + "/.bootleg/device.toml") && !fs.existsSync(card + "/Music/bootleg/Playlists/Road.m3u8"))) bad.push("device sync touched the wrong files");
 if (bad.length) { console.error("SELF-TEST FAILED:", bad.join(", "), r.error || ""); process.exit(1); } console.log("self-test passed");' "$T/out.json" "$T/dlna.log" "$T/card"

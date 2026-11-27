@@ -26,13 +26,20 @@ export class Player extends EventTarget {
     this.out = ctx.createGain(); this.vol = ctx.createGain(); this.out.connect(this.vol);
     this.lim = ctx.createDynamicsCompressor(); this.lim.threshold.value = -1.5; this.lim.knee.value = 0; this.lim.ratio.value = 20; this.lim.attack.value = 0.002; this.lim.release.value = 0.12;   // two decks summed must not clip
     this.audio._mes = ctx.createMediaElementSource(this.audio); this.elFade = ctx.createGain(); this.audio._mes.connect(this.elFade); this.elFade.connect(this.out);
+    // music videos (videos.js) play in a <video> element through the same fade → out → volume path, so the visualizer,
+    // inserts and volume work on their sound too. `this.audio` is whichever element is in use; the page shows `videoEl`.
+    this.audioEl = this.audio; this.videoEl = document.createElement('video'); Object.assign(this.videoEl, { crossOrigin: 'anonymous', preload: 'auto', playsInline: true, className: 'bvideo' });
+    this.videoEl._mes = ctx.createMediaElementSource(this.videoEl); this.videoEl._mes.connect(this.elFade);
+    this.video = null; this.videoMode = (() => { try { return localStorage.getItem('bootleg.videoMode') === '1'; } catch { return false; } })(); this._pick = null;
     try { this.deck.master.disconnect(); } catch { /* fresh */ } this.stemFade = ctx.createGain(); this.stemFade.gain.value = 0; this.deck.master.connect(this.stemFade); this.stemFade.connect(this.out);
     this.A = new BufDeck(ctx, 'A', this.out); this.B = new BufDeck(ctx, 'B', this.out); this.main = null;
     for (const d of [this.A, this.B]) d.onend = deck => this._deckEnded(deck);
     feed.fromNode(this.out);
     this.volume = Number(localStorage.getItem('bootleg.volume') ?? 0.9); this.setVolume(this.volume);
-    for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange']) this.audio.addEventListener(ev, () => this._emit());
-    this.audio.addEventListener('ended', () => { if (this.mode !== 'element') return; if (this.plan && this.plan.T - this.ctx.currentTime < 0.5) return; this._ended(); });   // a scheduled next track is about to start: let it
+    for (const el of [this.audioEl, this.videoEl]) {
+      for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange']) el.addEventListener(ev, () => { if (el === this.audio) this._emit(); });
+      el.addEventListener('ended', () => { if (el !== this.audio || this.mode !== 'element') return; if (this.plan && this.plan.T - this.ctx.currentTime < 0.5) return; this._ended(); });   // a scheduled next track is about to start: let it
+    }
     setInterval(() => { if (this.mode === 'deck' && !this.plan && this.deck.playing && this.deck.pos() >= this.deck.dur - 0.02) { this.deck.pause(); this.deck.offset = this.deck.dur; this._ended(); } }, 200);
     setInterval(() => this._tick(), 250); document.addEventListener('visibilitychange', () => this._tick());
     if ('mediaSession' in navigator) { const m = navigator.mediaSession; m.setActionHandler('play', () => this.play()); m.setActionHandler('pause', () => this.pause()); m.setActionHandler('previoustrack', () => this.prev()); m.setActionHandler('nexttrack', () => this.next()); m.setActionHandler('seekto', e => this.seek(e.seekTime)); }
@@ -81,9 +88,12 @@ export class Player extends EventTarget {
   // A stem set plays from its mix straight away (one file, instant start). Its stems are decoded only when wanted — the stem
   // mixer, a stem-aware visualizer, or the "always" setting — and then take over seamlessly at the current position.
   async _load(item) {
-    this._invalidate(); this.deck.pause(); this.audio.pause(); this.A.pause(); this.B.pause(); this.loading = null; this._stemsFor = null; this._failed = null;
-    const ready = this.transition.mode !== 'off' && [this.A, this.B].find(d => d.item === item && d.buf);   // already decoded (the next track, or one played just now)
-    if (ready) {
+    this._invalidate(); this.deck.pause(); this.audioEl.pause(); this.videoEl.pause(); this.A.pause(); this.B.pause(); this.loading = null; this._stemsFor = null; this._failed = null;
+    const vid = this.videoOf(item); this.video = vid; this._useEl(vid ? this.videoEl : this.audioEl);
+    const ready = !vid && this.transition.mode !== 'off' && [this.A, this.B].find(d => d.item === item && d.buf);   // already decoded (the next track, or one played just now)
+    if (vid) {
+      this.mode = 'element'; this.deck.dispose(); this._solo(); this.stemsState = 'none'; this._elItem = item; await this._setSrc(vid.src);
+    } else if (ready) {
       this.deck.dispose(); this.main = ready; this.mode = 'buf'; ready.offset = 0; ready.setRate(1); this._solo(); this.stemsState = item.kind === 'render' ? 'unloaded' : 'none';
     } else if (item.kind === 'render' && !item.mix) {                                 // no mix file: the stems are all there is
       this.mode = 'deck'; this._solo(); this.stemsState = 'loading'; this.audio.removeAttribute('src'); this.audio.load(); this._elItem = null; this.loading = { n: 0, total: item.stems.length }; this._emit();
@@ -94,8 +104,24 @@ export class Player extends EventTarget {
     this._applyOut(); this._media(item); this._emit();
     if (item.kind === 'render' && this.stemPolicy === 'auto') this.ensureStems();
   }
+  // ---- music videos: what plays for `item` — a video item itself, or (with video mode on) its linked video; else null
+  videoOf(item) {
+    if (!item || this.dj) return null; if (item.kind === 'video') return item;
+    if (this._pick && this._pick.item === item) return this._pick.video;
+    return this.videoMode ? this.hooks.videoFor?.(item) || null : null;
+  }
+  _useEl(el) { const old = this.audio; if (old === el) return; old.pause(); if (old === this.videoEl) { old.removeAttribute('src'); old.load(); } this.audio = el; }
+  // Video mode: tracks with a linked music video play the video (with its own sound) instead. Applies to the track now
+  // playing at once (from the start: a video's edit seldom lines up with the album version).
+  async setVideoMode(on) {
+    this.videoMode = !!on; this._pick = null; try { localStorage.setItem('bootleg.videoMode', on ? '1' : '0'); } catch { /* private mode */ }
+    const item = this.item; if (item && item.kind !== 'video' && !!this.video !== !!this.videoOf(item)) { const was = this.playing; await this._load(item); if (was || on) this.play(); }
+    this._emit();
+  }
+  /// Plays one particular video for the track now playing (or, with null, goes back to the track).
+  async watch(video) { const item = this.item; if (!item) return; this._pick = video ? { item, video } : { item, video: null }; await this._load(item); this.play(); }
   async ensureStems() {
-    const item = this.item; if (this.dj || !item || item.kind !== 'render' || this.stemsState !== 'unloaded' || (this.mode !== 'element' && this.mode !== 'buf')) return;
+    const item = this.item; if (this.video || this.dj || !item || item.kind !== 'render' || this.stemsState !== 'unloaded' || (this.mode !== 'element' && this.mode !== 'buf')) return;
     const wait = this._fadingUntil - performance.now(); if (wait > 0) { clearTimeout(this._esT); this._esT = setTimeout(() => this.ensureStems(), wait + 50); return; }   // the last track is still fading out of the stem deck
     this.stemsState = 'loading'; this._stemsFor = item; this.loading = { n: 0, total: item.stems.length }; this._emit();
     try {
@@ -173,7 +199,7 @@ export class Player extends EventTarget {
     this._retire(); this._emit();
   }
   toggle() { this.playing ? this.pause() : this.play(); }
-  stop() { this._invalidate(); this.auto = null; this.deck.pause(); this.audio.pause(); this.A.pause(); this.B.pause(); this._emit(); }
+  stop() { this._invalidate(); this.auto = null; this.deck.pause(); this.audioEl.pause(); this.videoEl.pause(); this.A.pause(); this.B.pause(); this._emit(); }
   seek(t) {
     t = Math.max(0, t); this._invalidate();
     if (this.dj) this.djMain()?.seek(t); else if (this.mode === 'buf') this.main.seek(t); else if (this.mode === 'deck') this.deck.seek(t); else this.audio.currentTime = t;
@@ -195,10 +221,10 @@ export class Player extends EventTarget {
   _tick() {
     this._commit();
     if (this.dj) { const a = this.auto; if (a && this.ctx.currentTime >= a.t0 + a.len) { this.auto = null; a.from.pause(); this.setX(a.to === this.B ? 1 : 0, true); } return; }
-    if (this.transition.mode === 'off' || !this._wantPlay || !this.playing || this.plan || this.localOut === false || !this.item) return;
+    if (this.transition.mode === 'off' || !this._wantPlay || !this.playing || this.plan || this.localOut === false || !this.item || this.video) return;   // no gapless/crossfade out of a video
     if (this.mode === 'element' && this.audio.currentTime > PROMOTE_AFTER) this._promote();
     const o = this._cur(); if (!o) return;
-    const ni = this.peekNext(); if (ni == null) return; const next = this.queue[ni]; if (next === this._failed || !decodable(next)) return;
+    const ni = this.peekNext(); if (ni == null) return; const next = this.queue[ni]; if (next === this._failed || !decodable(next) || this.videoOf(next)) return;   // …or into one
     if ((o.dur - o.pos) / o.rate < this.transition.seconds + PREPARE) this._schedule(ni);
   }
   // the source now playing, as the transition sees it

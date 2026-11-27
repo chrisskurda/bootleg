@@ -1,6 +1,7 @@
 // Turns a plugin's Items into library "sources": the same shape the folder scanner produces (name/path/size/mtime/url),
 // plus `meta` (already-known tags, so nothing is read from the file) and `remote` (how to get it back after a restart).
 import { offlineUrl } from '../offline-hook.js';
+import { mediaUrl } from './net.js';
 const clean = s => String(s || 'track').replace(/[\\/:*?"<>|]+/g, '_');
 export const rootKey = (plugin, connId) => `${plugin.id}:${connId}`;
 
@@ -8,11 +9,12 @@ export function remoteSource(plugin, session, connId, item) {
   if (item.kind === 'file') return fileSource(plugin, session, connId, item);
   const root = rootKey(plugin, connId), cover = plugin.coverUrl ? plugin.coverUrl(session, item, 512) : '';
   return {
-    kind: 'remote', name: `${clean(item.title)}.${item.suffix || 'mp3'}`, path: `${root}/${item.id}`, size: item.size || 0, mtime: item.changed || 0,
+    kind: 'remote', name: `${clean(item.title)}.${item.suffix || (item.kind === 'video' ? 'mp4' : 'mp3')}`, path: `${root}/${item.id}`, size: item.size || 0, mtime: item.changed || 0,
     url: () => offlineUrl(`${root}/${item.id}`) || plugin.streamUrl(session, item),          // a kept offline copy first
+    ...(plugin.cors === false ? { urlAsync: async () => offlineUrl(`${root}/${item.id}`) || mediaUrl(plugin.streamUrl(session, item)) } : {}),      // what the player loads (src/lib/sources/net.js)
     fetch: init => { const off = offlineUrl(`${root}/${item.id}`); return off ? fetch(off, init) : plugin.fetch ? plugin.fetch(session, plugin.streamUrl(session, item), init) : fetch(plugin.streamUrl(session, item), init); },
     reader: null, text: async () => '',
-    meta: { title: item.title, artist: item.artist || '', album: item.album || '', albumArtist: item.albumArtist || '', year: item.year || '', track: item.track || 0, disc: item.disc || 0, genre: item.genre || '', duration: item.duration || undefined, coverUrl: cover || null, remote: plugin.id },
+    meta: { title: item.title, artist: item.artist || '', album: item.album || '', albumArtist: item.albumArtist || '', year: item.year || '', track: item.track || 0, disc: item.disc || 0, genre: item.genre || '', duration: item.duration || undefined, coverUrl: cover || null, remote: plugin.id, ...(item.kind === 'video' ? { video: true } : {}) },
     remote: { plugin: plugin.id, conn: connId, item },   // persisted in the file index so the library appears instantly (and offline) on the next start
   };
 }

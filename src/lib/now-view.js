@@ -85,7 +85,7 @@ export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, compose
   // ---- the spectrogram (decoded in the background, cached)
   async function loadSpectro(it) {
     const my = ++tok, ctx = spec.getContext('2d'); ctx.clearRect(0, 0, spec.width, spec.height); spec.classList.remove('on'); tstat.textContent = '';
-    const src = it.kind === 'render' ? it.mix : it.src, mode = spectroMode(); if (!src || mode === 'off') return;
+    const src = it.kind === 'render' ? it.mix : it.src, mode = spectroMode(); if (!src || mode === 'off' || it.kind === 'video') return;
     if (mode === 'local' && src.kind === 'remote') { tstat.textContent = 'Spectrogram off for server tracks (Settings → Now playing)'; return; }
     if ((src.size || 0) > 400e6) { tstat.textContent = 'File too large for a spectrogram'; return; }
     let s = await spectros.get(key); if (my !== tok) return;
@@ -105,7 +105,7 @@ export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, compose
   plot.addEventListener('click', e => { const r = plot.getBoundingClientRect(), d = player.dur(); if (d) player.seek((e.clientX - r.left) / r.width * d); });
   let heatPaint = 0;
   (function loop(now) {
-    const d = player.dur(), p = player.pos(); heat.tick(p, d, player.playing);
+    const d = player.dur(), p = player.pos(); heat.tick(p, d, player.playing && !player.video);      // a music video's clock is not the track's
     if (isShown()) { head.style.left = (d ? p / d * 100 : 0) + '%'; if (now - heatPaint > 2000) { heatPaint = now; paintHeat(); } }
     requestAnimationFrame(loop);
   })(0);
@@ -114,11 +114,11 @@ export function initNowView({ player, notes, keyOf, h, fmt, $, editTags, compose
 
   async function refresh() {
     const it = player.item, k = keyOf(it), changed = it !== item; item = it; if (k !== key) { key = k; rec = null; await heat.load(k); }
-    rec = k ? await notes.get(k) : null; if (player.item !== it) return; paintInfo(); paintNext(); paintNotes(); paintHeat(); paintScale(); tl.hidden = !it;
+    rec = k ? await notes.get(k) : null; if (player.item !== it) return; paintInfo(); paintNext(); paintNotes(); paintHeat(); paintScale(); tl.hidden = !it || !!player.video;      // the timeline is the track's; a video is another edit
     if (changed && it) loadSpectro(it); else if (!it) { tok++; }
   }
-  let lastDur = 0;
-  player.addEventListener('change', () => { if (player.item !== item || player.dur() !== lastDur) { lastDur = player.dur(); refresh(); } else { paintNext(); const k = info.querySelector('.kicker'); if (k) k.firstChild.textContent = player.playing ? 'Now playing' : 'Paused'; } });
+  let lastDur = 0, lastVid = null;
+  player.addEventListener('change', () => { if (player.item !== item || player.dur() !== lastDur || player.video !== lastVid) { lastDur = player.dur(); lastVid = player.video; refresh(); } else { paintNext(); const k = info.querySelector('.kicker'); if (k) k.firstChild.textContent = player.playing ? 'Now playing' : 'Paused'; } });
   notes.addEventListener('change', () => refresh());
   return { refresh };
 }

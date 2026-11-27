@@ -1,0 +1,18 @@
+{
+  "spec": "2.0",
+  "id": "plex",
+  "name": "Plex",
+  "version": "0.1.0",
+  "description": "Music and music videos from a Plex Media Server: sign in with plex.tv, browse and play, ratings (half stars) both ways, playlists and offline copies. Music videos (Plex keeps them with each artist) play on Now playing and are matched to your tracks from any source.",
+  "entry": "index.js",
+  "provides": ["source"],
+  "settings": [
+    { "key": "videos", "label": "Music videos", "type": "bool", "default": true, "hint": "Look for the music videos Plex keeps with each artist (one request per artist on each scan)." }
+  ],
+  "platforms": {
+    "macos":   { "status": "experimental" },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "experimental", "why": "Plex lets only its own web app read media from a page, so the web build can list a Plex library but not play it." }
+  }
+}

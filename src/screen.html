@@ -7,13 +7,14 @@
 <title>bootleg — visualizer screen</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; font: 14px system-ui, sans-serif; color: #8b93b0; }
-  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+  iframe, video { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; } video { object-fit: contain; background: #000; } video[hidden], iframe.off { visibility: hidden; }
   #msg { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; pointer-events: none; }
   #msg[hidden] { display: none; } .wordmark { display: block; font-size: 30px; letter-spacing: .025em; color: #e7eaf6; margin-bottom: 8px; } .wordmark b { color: #7c8cff; }
 </style>
 </head>
 <body>
 <iframe id="pack" title="Visualizer"></iframe>
+<video id="mv" muted playsinline hidden></video>
 <div id="msg"><div><span class="wordmark">boot<b>leg</b></span>Waiting for the player… start music in the bootleg window.<br><small>Double-click for fullscreen · Esc closes</small></div></div>
 <script src="/vendor/bootleg-vizualizer/core/look.js"></script>
 <script src="/vendor/bootleg-vizualizer/core/meta.js"></script>

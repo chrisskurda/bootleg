@@ -35,6 +35,12 @@ plugin (`src/lib/sources/stemserver.js`) works this way.
 ```
 Register it in `src/lib/sources/index.js` (`registerSource(myService)`). That's all: the app then offers it under *Settings → library → Connect a server or service…*.
 
+**As a packaged plugin** (its own version, turned on and off in Settings → Plugins): `plugins/<id>/plugin.json` with `"provides": ["source"]`, and `activate(api)` calls `api.sources.register(source)` and returns its unregister function as `stop` ([PLUGIN-SPEC.md](PLUGIN-SPEC.md)). Jellyfin and Plex (`plugins/jellyfin`, `plugins/plex`, [docs/plugins/SERVERS.md](plugins/SERVERS.md)) work this way; build the source in a plain module (`net` = `api.net.fetch`) so it can be tested in node.
+
+**Music videos:** Items with `kind: 'video'` (title, artist, year, duration, coverId, suffix) become library videos, matched to tracks from every source ([VIDEOS.md](VIDEOS.md)). `streamUrl` must give something a `<video>` element plays: MP4/H.264 + AAC is the safe choice, so ask the server to convert when it can.
+
+**`cors: false`:** for a server that doesn't allow other web origins (Plex). The desktop app then plays its media through a loopback proxy that adds CORS (`src-tauri/src/proxy.rs`); the web build can't play it.
+
 ## What you get for free
 - Items become library tracks that arrive **already tagged** (nothing is read from files), listed, searched, sorted, queued, rated, noted, tagged, put in playlists and shown to the visualizer like any other track.
 - The track list is **cached** (IndexedDB) so the library appears instantly — and offline — on the next start; it is then **re-scanned incrementally in the background** (new items appear, items the service no longer has disappear), on startup / every N minutes / on demand.

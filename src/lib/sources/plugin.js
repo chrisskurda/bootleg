@@ -22,6 +22,8 @@
 //     async setRating(session, itemId, stars)          // optional, whole stars 0–5: bootleg ratings sync both ways
 //     async setStarred(session, itemId, on)            // optional: the server's favourite/star ↔ the bootleg tag "starred"
 //     async rescan(session)                            // optional: ask the server to re-read its files (after bootleg wrote tags)
+//     cors: false                                        // optional: the server doesn't allow other origins (Plex). The desktop app
+//                                                         //   then plays its media through a loopback proxy (src-tauri/src/proxy.rs).
 //     offline: true                                      // optional: the service allows keeping copies on this computer (offline
 //                                                         //   store, device sync). Leave it out when its terms forbid that (DRM'd
 //                                                         //   or streaming-only services): their tracks are then never stored.
@@ -30,6 +32,9 @@
 //                                                         //   can convert); return what you will actually send (`quality`, `ext`).
 //   }
 //   Item = { id, title, artist, album, albumArtist, year, track, disc, genre, duration, size, suffix, changed, coverId, bitrate, rating?, starred?, path? }
+//     `kind: 'video'`: a music video (title, artist, year, duration, coverId, suffix); it plays with its own sound and is
+//       linked to tracks by artist and title or by hand (src/lib/videos.js, docs/VIDEOS.md). streamUrl must give a URL a
+//       <video> element can play (MP4/H.264 + AAC is the safe choice; ask the server to convert when it can).
 //     `path`: the file's real path inside the server's music folder, when the server reports it (used to write tag edits to files)
 //     `id` must be stable; `changed` (ms or any increasing token) lets rescans notice edits.
 //
@@ -38,4 +43,5 @@
 const registry = new Map();
 export const registerSource = p => { for (const k of ['id', 'name', 'fields', 'connect', 'session', 'scan', 'streamUrl']) if (!(k in p)) throw new Error(`source plugin is missing "${k}"`); registry.set(p.id, p); return p; };
 export const getSource = id => registry.get(id) || null;
+export const unregisterSource = id => registry.delete(id);
 export const listSources = () => [...registry.values()];

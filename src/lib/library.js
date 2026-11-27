@@ -5,6 +5,7 @@ import { AUDIO_RE, NFO_RE, PKG_RE } from './source.js';
 import { openPackage } from './stempkg.js';
 import { NullCache } from './cache.js';
 import { parseNfo } from './nfo.js';
+import { VIDEO_RE, fromFileName, splitTitle } from './videos.js';
 
 const dirOf = p => p.slice(0, Math.max(0, p.lastIndexOf('/')));
 const stem = n => n.replace(/\.[^.]+$/, '');
@@ -37,7 +38,7 @@ async function thumb(blob) {
 
 export class Library extends EventTarget {
   constructor() {
-    super(); this.tracks = []; this.renders = []; this._n = 0; this._seen = new Set(); this._byPath = new Map(); this._q = []; this._busy = 0; this.total = 0; this.done = 0; this._pending = false;
+    super(); this.tracks = []; this.renders = []; this.videos = []; this._n = 0; this._seen = new Set(); this._byPath = new Map(); this._q = []; this._busy = 0; this.total = 0; this.done = 0; this._pending = false;
     this._covers = new Map(); this._coverP = new Map(); this.cache = new NullCache(); this.fileCache = new Map(); this._dirty = []; this._flushT = 0;
     this.stats = { read: 0, cached: 0 }; this.concurrency = 6; this.useNfo = true; this.nfoFill = true; this.nfos = new Map(); this._nfoT = 0; this.scope = 'all'; this.ver = 0; this._memo = {}; this.nativeReader = null; this.includeRenders = true; this.edits = new Map(); this.editKey = () => null;
   }
@@ -57,6 +58,7 @@ export class Library extends EventTarget {
   // Derived lists are memoized per (data version, library scope): big libraries re-render often while tags stream in.
   _memoed(key, build) { const k = this.ver + '|' + this.scope, m = this._memo[key]; if (m && m.k === k) return m.v; const v = build(); this._memo[key] = { k, v }; return v; }
   get visibleTracks() { return this.scope === 'all' ? this.tracks : this._memoed('vt', () => this.tracks.filter(t => t.libs.has(this.scope))); }
+  get visibleVideos() { return this.scope === 'all' ? this.videos : this._memoed('vv', () => this.videos.filter(v => v.libs.has(this.scope))); }
   get visibleRenders() { return this.scope === 'all' ? this.renders : this._memoed('vr', () => this.renders.filter(r => r.libs.has(this.scope))); }
   add(sources, libId = 'music') {
     const fresh = [];
@@ -65,6 +67,7 @@ export class Library extends EventTarget {
     const { renderDirs, renderFiles } = this._findRenders(fresh, libId);
     for (const s of fresh) {
       if (NFO_RE.test(s.name)) { const n = { kind: 'nfo', src: s, dir: dirOf(s.path), parsed: null }; this._byPath.set(s.path, n); this._enqueue(() => this._loadNfo(n)); continue; }
+      if (s.meta?.video || (!s.meta && VIDEO_RE.test(s.name))) { const v = { id: 'v' + (++this._n), kind: 'video', src: s, libs: new Set([libId]) }; this._applyVideo(v, s); this.videos.push(v); this._byPath.set(s.path, v); continue; }
       if (!(s.meta || AUDIO_RE.test(s.name)) || renderFiles.has(s.path) || renderDirs.some(d => s.path.startsWith(d + '/'))) continue;     // plain tracks: audio that is not part of a stem set
       const t = { id: 't' + (++this._n), kind: 'track', src: s, title: titleFromFile(s), artist: '', album: '', year: '', track: 0, disc: 0, genre: '', bpm: undefined, key: '', duration: undefined, coverUrl: null, tagged: false, nfo: null, libs: new Set([libId]) };
       this.tracks.push(t); this._byPath.set(s.path, t);
@@ -117,6 +120,11 @@ export class Library extends EventTarget {
   _pump() {
     const limit = this.nativeReader ? Math.max(this.concurrency, 192) : this.concurrency;      // native reading batches many files per call
     while (this._busy < limit && this._q.length) { const j = this._q.shift(); this._busy++; j().catch(() => {}).finally(() => { this._busy--; this.done++; if (!this._busy && !this._q.length) this.flush(); this._changed(); this._pump(); }); }
+  }
+  // Music videos (videos.js): what a source plugin says, or for a file what its name says ("Artist - Title.mp4")
+  _applyVideo(v, s) {
+    const m = !s.meta ? fromFileName(s.name) : s.meta.artist ? s.meta : { ...s.meta, ...splitTitle(s.meta.title) };      // a server's video without an artist: often "Artist - Title"
+    Object.assign(v, { _hay: null, title: m.title || s.name, artist: m.artist || '', year: m.year || '', duration: m.duration || undefined, coverUrl: m.coverUrl || null, remote: !!s.meta });
   }
   // Items from a source plugin arrive already tagged (nothing to read from a file).
   _applyRemote(t, s) { t._hay = null; const { coverUrl, remote, ...tags } = s.meta; blankFields(t); Object.assign(t, { tagged: true, remote: true }, tags); t.coverUrl = coverUrl || null; t._src = pickFields(t); this._nfoFor(t); }
@@ -190,14 +198,14 @@ export class Library extends EventTarget {
 
   // ---- keeping up with the disk
   _update(old, s) {
-    old.src = s; if (old.kind === 'track' && s.meta) this._applyRemote(old, s); else if (old.kind === 'track') { old.tagged = false; this._enqueue(() => this._loadTags(old)); } else if (old.kind === 'nfo') this._enqueue(() => this._loadNfo(old)); else if (old.kind === 'render') { old.src = s; this._enqueue(() => this._loadRender(old)); }
+    old.src = s; if (old.kind === 'video') { this._applyVideo(old, s); return; } if (old.kind === 'track' && s.meta) this._applyRemote(old, s); else if (old.kind === 'track') { old.tagged = false; this._enqueue(() => this._loadTags(old)); } else if (old.kind === 'nfo') this._enqueue(() => this._loadNfo(old)); else if (old.kind === 'render') { old.src = s; this._enqueue(() => this._loadRender(old)); }
   }
   // Drop everything under `root` that a fresh scan no longer finds (deleted/moved files). Returns how many entries went away.
   removeMissing(root, present, libId = 'music') {
     const gone = [], under = p => p.startsWith(root.replace(/\/+$/, '') + '/');
     for (const [p, e] of this._byPath) if (under(p) && !present.has(p)) { if (e.libs && (e.libs.delete(libId), e.libs.size)) continue; gone.push([p, e]); }
     if (!gone.length) return 0; const dead = new Set(gone.map(x => x[1]));
-    this.tracks = this.tracks.filter(t => !dead.has(t)); this.renders = this.renders.filter(r => !dead.has(r));
+    this.tracks = this.tracks.filter(t => !dead.has(t)); this.renders = this.renders.filter(r => !dead.has(r)); this.videos = this.videos.filter(v => !dead.has(v));
     for (const [p, e] of gone) { this._byPath.delete(p); this._seen.delete(p); this.fileCache.delete(p); if (e.kind === 'nfo') { this.nfos.set(e.dir, (this.nfos.get(e.dir) || []).filter(x => x !== e)); } }
     for (const p of [...this._seen]) if (under(p) && !present.has(p)) this._seen.delete(p);
     this.cache.delFiles(gone.map(x => x[0])).catch(() => {}); this._nfoSoon(); this._changed(); return gone.length;
@@ -211,6 +219,6 @@ export class Library extends EventTarget {
   albums() { return this._memoed('albums', () => this._albums()); }
   _albums() { const m = new Map(); for (const t of this.sortedTracks()) { const k = (t.albumArtist || t.artist || '') + '\u0000' + (t.album || ''); if (!t.album) continue; if (!m.has(k)) m.set(k, { key: k, album: t.album, artist: t.albumArtist || t.artist, coverUrl: t.coverUrl, tracks: [] }); const a = m.get(k); a.tracks.push(t); a.coverUrl ||= t.coverUrl; } return [...m.values()]; }
   // Remove a library's claim on everything; entities no library claims any more go away (their cache entries stay: another library or a re-add may want them).
-  dropLibrary(libId) { const dead = new Set(); for (const [p, e] of this._byPath) if (e.libs) { e.libs.delete(libId); if (!e.libs.size) { dead.add(e); this._byPath.delete(p); this._seen.delete(p); } } this.tracks = this.tracks.filter(t => !dead.has(t)); this.renders = this.renders.filter(r => !dead.has(r)); this._changed(); return dead.size; }
-  clear() { this.tracks = []; this.renders = []; this._seen.clear(); this._byPath.clear(); this.nfos.clear(); this._changed(); }
+  dropLibrary(libId) { const dead = new Set(); for (const [p, e] of this._byPath) if (e.libs) { e.libs.delete(libId); if (!e.libs.size) { dead.add(e); this._byPath.delete(p); this._seen.delete(p); } } this.tracks = this.tracks.filter(t => !dead.has(t)); this.renders = this.renders.filter(r => !dead.has(r)); this.videos = this.videos.filter(v => !dead.has(v)); this._changed(); return dead.size; }
+  clear() { this.tracks = []; this.renders = []; this.videos = []; this._seen.clear(); this._byPath.clear(); this.nfos.clear(); this._changed(); }
 }

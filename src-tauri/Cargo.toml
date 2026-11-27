@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 tiny_http = "0.12"
 base64 = "0.22"
 lofty = "0.22"
-ureq = { version = "2", default-features = false }
+ureq = { version = "2", default-features = false, features = ["tls"] }      # tls: the media proxy (src/proxy.rs) reaches https servers (Plex)
 bootleg-plugin-api = { path = "plugin-api" }
 bootleg-sync = { path = "../vendor/bootleg-sync" }
 toml = "1"

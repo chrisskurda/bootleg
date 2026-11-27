@@ -10,7 +10,7 @@ import { VirtualList } from '/lib/vlist.js';
 import { albumPane } from '/lib/album-pane.js';
 import { albumKey } from '/lib/album-details.js';
 import { initNotes, trackKey, stars, migrateRemoteKeys } from '/lib/notes-ui.js';
-import { getSource, listSources } from '/lib/sources/index.js';
+import { getSource, listSources, registerSource, unregisterSource } from '/lib/sources/index.js';
 import { scanConnection, fromIndexEntry, toIndexEntry, rootKey } from '/lib/sources/remote.js';
 import { RemoteAnnotations } from '/lib/sources/annotations.js';
 import { openTagEditor } from '/lib/tag-editor.js';
@@ -35,6 +35,8 @@ import { initOffline } from '/lib/offline-ui.js';
 import { filesFor } from '/lib/devices.js';
 import { registerProvider, listProviders, lookupAll, Chosen } from '/lib/metadata.js';
 import { Secrets, connKey, splitConfig, fullConfig, migrateConnections } from '/lib/secrets.js';
+import { VideoLinks } from '/lib/videos.js';
+import { initVideos } from '/lib/videos-ui.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -63,7 +65,7 @@ function placeViz() {
 function setDrawer(open) { $('#vizDrawer').hidden = !open; $('#vizStage').classList.toggle('drawer', open); $('#vizGear').classList.toggle('on', open); }
 function show(v) {
   view = v; $$('.view').forEach(s => { s.hidden = s.id !== 'view-' + v; }); $$('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === v)); placeViz();
-  syncViz(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } extViews.get(v)?.shown?.(); if (v === 'devices') devices?.shown(); renderAll();
+  syncViz(); if (v === 'videos') videosUI?.render($('#search').value); if (v === 'now') videosUI?.paintNow(); if (v === 'settings') { $('#settingsBody').replaceChildren(); paintSettings(); } if (v === 'notes' || v === 'playlists') { $('#noteCards').replaceChildren(); $('#plList').replaceChildren(); notes.paintLists(); } extViews.get(v)?.shown?.(); if (v === 'devices') devices?.shown(); renderAll();
 }
 const navClick = b => { b.onclick = () => show(b.dataset.view); }; $$('.nav').forEach(navClick); $('#np').onclick = () => show('now');
 $('#vizGear').onclick = () => setDrawer($('#vizDrawer').hidden); $('#drawerClose').onclick = () => setDrawer(false);
@@ -86,7 +88,7 @@ const defectChip = t => { const d = damaged.get(trackKey(t)); return d ? h('span
 function trackRow(t, i) {
   return h('div', { class: 'row' + (player.item?.id === t.id ? ' playing' : ''), 'data-id': t.id, ondblclick: () => acts.activate(shown, i, true) },
     h('span', {}, h('span', { class: 'n' }, String(i + 1)), h('button', { class: 'pl', title: 'Play', onclick: () => acts.now(shown, i, true) }, '▶')),
-    h('span', { class: 'tt' }, t.title, defectChip(t), t.edited ? h('span', { class: 'chip', title: 'Tags edited in bootleg (the file/server is unchanged)' }, '✎') : '', t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
+    h('span', { class: 'tt' }, t.title, defectChip(t), videosUI?.chip(t), t.edited ? h('span', { class: 'chip', title: 'Tags edited in bootleg (the file/server is unchanged)' }, '✎') : '', t.kind === 'render' ? h('span', { class: 'chip stemchip', title: `A stem set: the mix plays instantly; ${t.stems.length} stems load on demand` }, `♫ ${t.stems.length} stems`) : ''), h('span', { class: 'muted' }, t.artist || ''), h('span', { class: 'muted' }, t.album || ''),
     h('span', { class: 'tm' }, t.duration ? fmt(t.duration) : ''), h('span', { class: 'acts' }, t.kind === 'track' ? h('button', { class: 'mini', title: 'Edit tags (in bootleg)', onclick: () => editTags([t]) }, 'edit') : '', h('button', { class: 'mini', onclick: () => { player.enqueue([t], true); toast('Plays next'); } }, 'next'), h('button', { class: 'mini', onclick: () => { player.enqueue([t]); toast('Added to queue'); } }, '+ queue')));
 }
 const trackVL = new VirtualList({ scroller: $('#view-tracks'), container: $('#trackList'), rowH: 38, render: (t, i) => trackRow(t, i) });
@@ -196,10 +198,10 @@ function renderRenders() {
     h('div', { class: 'badges' }, h('span', { class: 'badge ok' }, `${r.stems.length} stems`), r.sections.length ? h('span', { class: 'badge' }, `${r.sections.length} sections`) : null, r.clipsSrc ? h('span', { class: 'badge' }, 'sample labels') : null)))));
   $('#emptyRenders').hidden = list.length > 0;
 }
-let albumCount = 0;
+let albumCount = 0, videosUI = null;      // videosUI: music videos (videos-ui.js), set up with Now playing below
 function renderAll() {
   const vt = lib.visibleTracks.length, vr = lib.visibleRenders.length, vi = lib.visibleItems.length; $('#nTracks').textContent = vi || ''; $('#nRenders').textContent = vr || ''; if (!(lib._q.length + lib._busy) || view === 'albums') albumCount = lib.albums().length; $('#nAlbums').textContent = albumCount || '';
-  if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders();
+  if (view === 'tracks') renderTracks(); else if (view === 'albums') renderAlbums(); else if (view === 'renders') renderRenders(); videosUI?.render($('#search').value);
   const left = lib._q.length + lib._busy; $('#status').textContent = left ? `Reading tags… ${left} left` : vt || vr ? `${plural(vt, 'track')} · ${plural(vr, 'stem set')}` : '';
 }
 // while tags stream in, redraw less often (each redraw of a big library is work a weaker machine can't spare)
@@ -210,7 +212,7 @@ $('#search').oninput = () => { gridLimit = 300; renderAll(); };
 const libs = new Libraries(store), secrets = new Secrets({ invoke: TAURI ? (c, a) => TAURI.core.invoke(c, a) : null, store }); lib.scope = libs.active; player.hooks.loadClips = r => lib.loadClips(r);
 let metaChosen; try { metaChosen = new Chosen(SELF || !window.indexedDB ? new MapKV() : new IdbKV('bootleg-metadata', ['chosen'])); } catch { metaChosen = new Chosen(new MapKV()); }      // the release chosen for each album (metadata.js)
 if (TAURI) lib.nativeReader = makeNativeTagReader(() => [...lib._covers.keys()]);
-const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, transition: 'gapless', matchTempo: false, djFade: 6, spectro: 'all', vizFloat: false, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
+const DEFAULTS = { ...PLAY_DEFAULTS, ...SHARE_DEFAULTS, transition: 'gapless', matchTempo: false, djFade: 6, spectro: 'all', vizFloat: false, vizVideo: true, miniOnMinimize: true, tagWrite: false, tagWriteHours: 0, includeRenders: true, stemsLoad: 'visualizer', albumView: 'grid', cacheEnabled: true, scanOnStart: true, rescanMinutes: 0, tagConcurrency: 6, useNfo: true, nfoFill: true };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let cache; try { cache = SELF ? new LibCache('bootleg-selftest-' + Date.now()) : settings.cacheEnabled ? new LibCache() : new NullCache(); } catch { cache = new NullCache(); }
 function applySettings() { const inc = lib.includeRenders; lib.includeRenders = settings.includeRenders !== false; if (inc !== lib.includeRenders) lib._changed(); player.stemPolicy = settings.stemsLoad; applyTransition(); lib.concurrency = Math.max(1, Math.min(32, +settings.tagConcurrency || 6)); lib.setNfoOptions({ useNfo: settings.useNfo, nfoFill: settings.nfoFill }); store.set('settings', settings); armRescan(); }
@@ -256,8 +258,9 @@ const sessionOf = r => { const c = libs.connection(r.conn), p = getSource(r.plug
 async function loadChunked(srcs, libId) {      // shows the cached library in slices so the window stays responsive
   scan.on = true; try { await lib.addChunked(srcs, libId, { onProgress: (n, total) => { scan.text = `Loading your library… ${n.toLocaleString()} of ${total.toLocaleString()}`; renderAll(); } }); } finally { scan.on = false; }
 }
-async function restoreFromCache() {
+async function restoreFromCache(only = null) {      // only: a source plugin's id (it was just turned on): just its connections
   for (const ix of await cache.indexes()) {
+    if (only && !ix.root.startsWith(only + ':')) continue;
     const owner = libs.ofRoot(ix.root); if (!owner) continue;
     try {
       if (ix.entries[0]?.remote) { await loadChunked(ix.entries.map(e => fromIndexEntry(e, getSource, sessionOf)).filter(Boolean), owner.id); continue; }     // a source plugin's library: no disk, no network needed
@@ -265,9 +268,22 @@ async function restoreFromCache() {
     } catch (e) { console.warn('cached root unavailable', ix.root, e); }
   } renderAll();
 }
+// A packaged plugin's source (api.sources.register, PLUGIN-SPEC §5): while the plugin runs, its connections are libraries
+// like Subsonic's. Turned on after startup: its cached tracks come back at once. Turned off: they leave the library (the
+// cache, the connections and their keychain entries stay, for when it is turned on again).
+function registerPluginSource(p) {
+  registerSource(p); if (libraryStarted) restoreFromCache(p.id).catch(e => console.warn('restore', p.id, e));
+  if (view === 'settings') paintSettings();
+  return () => {
+    if (getSource(p.id) !== p) return; unregisterSource(p.id);
+    for (const { conn, lib: L } of libs.allConnections()) if (conn.plugin === p.id) lib.removeMissing(rootKey(p, conn.id), new Set(), L.id);
+    renderAll(); if (view === 'settings') paintSettings();
+  };
+}
 // Startup: the cached library shows at once, then changes are looked for in the background (the window is usable throughout).
 // (0.2.0–0.3.0 skipped this on the desktop: opening files from the OS took its place instead of running beside it.)
-async function startLibrary() { await restoreFromCache(); if (settings.scanOnStart || (!lib.tracks.length && !lib.renders.length)) await syncAll(true); }
+let libraryStarted = false;
+async function startLibrary() { libraryStarted = true; await restoreFromCache(); if (settings.scanOnStart || (!lib.tracks.length && !lib.renders.length)) await syncAll(true); }
 // A new connection: its secret fields (the source plugin's `secrets`) go to the keychain, the rest is saved with the library.
 async function addConnection(L, p, vals, id = 'c' + Date.now().toString(36)) {
   const r = await p.connect(vals), { config, secret } = splitConfig(p, r.config), conn = { id, plugin: p.id, title: r.title, config };
@@ -438,6 +454,7 @@ const extApi = (id, meta = {}) => ({
   ...(meta.kind === 'plugin' ? {
     platform: { ...pluginRuntime, appVersion: pluginRuntime.appVersion || build?.version || '', status: extensions.availability(id).status },
     net: { fetch: netFetch },
+    sources: { register: p => registerPluginSource(p) },      // returns the function that unregisters it (call it in stop())
     metadata: { register: p => registerProvider(p), lookup: (q, o) => lookupAll(q, o), get providers() { return listProviders().map(p => ({ id: p.id, name: p.name })); } },      // register returns the function that unregisters it (call it in stop())
     ...(TAURI && meta.native && pluginRuntime.native.includes(id) ? { native: nativeApi(TAURI, id) } : {}),
     ...(TAURI ? { dialog: { folder: async ({ title } = {}) => { const d = await TAURI.dialog.open({ directory: true, multiple: false, title }); if (d) await TAURI.core.invoke('allow_path', { path: d }); return d || null; } } } : {}),
@@ -554,6 +571,7 @@ async function paintSettings() {
     h('h3', {}, 'Now playing'),
     row('Spectrogram on the timeline', 'The whole song’s spectrogram is drawn once per recording and remembered. For server tracks this downloads the file once more.', pick('spectro', { all: 'Local files and server tracks', local: 'Local files only', off: 'Off' }, () => nowView.refresh())),
     TAURI ? row('Mini player when bootleg is minimized', 'A small window with the controls and what is playing (like the Car Thing app). It goes away again when the main window comes back. The ◱ button in the player bar opens it any time.', h('input', { type: 'checkbox', id: 'set-miniOnMinimize', checked: !!settings.miniOnMinimize, onchange: e => { settings.miniOnMinimize = e.target.checked; applySettings(); } })) : '',
+    row('Music videos on visualizer screens', 'When what is playing has a music video (it is playing, or linked to the track), screens opened with “Show on another screen” show the video instead, silently and in step with the player. When the track plays rather than its video, the video loops as the picture.', h('input', { type: 'checkbox', id: 'set-vizVideo', checked: settings.vizVideo !== false, onchange: e => { settings.vizVideo = e.target.checked; applySettings(); } })),
     row('Mini visualizer while browsing', 'Keeps the visualizer in the corner on the other pages (the ▭ button on the visualizer does the same).', h('input', { type: 'checkbox', id: 'set-vizFloat', checked: !!settings.vizFloat, onchange: e => { settings.vizFloat = e.target.checked; applySettings(); placeViz(); } })),
     TAURI ? h('div', { class: 'muted small' }, 'Audio files opened from Finder or Explorer (“Open With → bootleg”, or bootleg set as the default player) play straight away, as ▶ does.') : '',
     ...(tagFiles ? tagFileSettings(row, chk, num) : []),
@@ -662,6 +680,19 @@ const nowView = initNowView({ player, notes: notes.store, keyOf: trackKey, h, fm
     return () => p.openInComposer(ses, id).then(() => toast('Sent to Composer — it opens there'), e => toast(String(e.message || e), true));
   },
   search: q => { $('#search').value = q; show('tracks'); $('#search').oninput(); }, openQueue: () => { if ($('#queue').hidden) $('#qToggle').click(); } });
+// music videos: linked to tracks across every source; they play (with their own sound) on Now playing
+let videoKV; try { videoKV = SELF || !window.indexedDB ? new MapKV() : new IdbKV('bootleg-videos', ['links']); } catch { videoKV = new MapKV(); }
+const videoLinks = new VideoLinks(videoKV);
+videosUI = initVideos({ h, $, lib, player, keyOf: trackKey, links: videoLinks, fmt, toast, playList: (l, i) => acts.now(l, i), sourceName: r => libs.allConnections().find(c => c.conn.id === r.conn)?.conn.title || '' });
+videoLinks.ready.then(() => renderAll());
+// …and on visualizer screens (screen.js): the video playing, or the one linked to the track, sent with each frame
+{ let memo = { k: '', v: null };
+  viz.videoInfo = () => {
+    const it = player.item; if (settings.vizVideo === false || !it) return null;
+    const k = `${it.id}|${lib.ver}|${player.video?.id}`; if (memo.k !== k) memo = { k, v: player.video || videosUI.of(it)[0]?.video || null };
+    const v = memo.v; if (!v) return null; let url; try { url = v.src.url(); } catch { return null; }
+    return { url, key: v.src.path, t: player.pos(), playing: player.playing, own: player.video === v };
+  }; } videoLinks.addEventListener('change', () => renderAll());
 // a server's ratings, stars and playlists ↔ bootleg (Subsonic/Navidrome); pushes go out as you rate
 // tag edits → the library (on start, on every change, and after a notes import)
 notes.store.allEdits().then(m => lib.setEdits(m)).catch(() => {});
@@ -698,6 +729,31 @@ async function selfTestChecker() {
 }
 // The Record plugin against its simulated input: record a side (a WAV played as if from a turntable), find its two
 // tracks, save them as FLAC next to the self-test library, import them with their provenance, delete the raw recording.
+// Music videos on the desktop: a local MP4 (asset protocol) linked to the self-test track, played with
+// its own sound through the audio graph.
+const peakNow = async () => { let pk = 0; for (let i = 0; i < 20; i++) { pk = Math.max(pk, ...feed.update(0.05).spectrum); await new Promise(r => setTimeout(r, 50)); } return pk; };
+const waitFor = async (f, ms = 20000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting for ' + f); await new Promise(r => setTimeout(r, 100)); } };
+async function selfTestVideo() {
+  const t = lib.tracks.find(x => /\/A\/st\.flac$/.test(x.src.path)), v = lib.videos.find(x => x.src.kind === 'tauri');      // (the track was retitled by the tag-writing check above, so it is linked by hand)
+  if (!t || !v) return { error: 'no track or no local video', videos: lib.videos.length };
+  await videoLinks.link(trackKey(t), v.src.path); const m = videosUI.of(t).find(x => x.video === v && x.how === 'linked'); if (!m) return { error: 'the link did not take' };
+  await player.playList([t], 0); await player.watch(m.video); await waitFor(() => player.video && player.playing && player.pos() > 0.7 && player.videoEl.videoWidth > 0, 15000);
+  const out = { ok: false, size: `${player.videoEl.videoWidth}x${player.videoEl.videoHeight}`, peak: await peakNow() }; out.ok = out.peak > 0.1; player.pause(); return out;
+}
+// Plex: a packaged source plugin whose server allows no other origins, so the player streams through the loopback
+// media proxy (src-tauri/src/proxy.rs). Silence here would mean the audio graph could not read the stream.
+async function selfTestPlex() {
+  const url = await TAURI.core.invoke('selftest_plex'); if (!url) return { skipped: 'no mock server' };
+  const { plex } = await import('/plugins/plex/plex-logic.js'), src = plex(netFetch, { open: () => { throw new Error('no sign-in expected'); } });
+  if (!getSource('plex')) registerSource(src);
+  const L = libs.target(), conn = await addConnection(L, getSource('plex'), { url }, 'plexst'), r = await syncConnection(conn, L), out = { ok: false, total: r.total };
+  const t = lib.tracks.find(x => x.src.remote?.plugin === 'plex' && x.title === 'Plex One'); if (!t) return { ...out, error: 'no Plex tracks' };
+  await player.playList([t], 0); await waitFor(() => player.playing && player.pos() > 0.7, 15000);
+  out.proxied = /^http:\/\/127\.0\.0\.1:\d+\/p\/[0-9a-f]{32}$/.test(player.audio.src); out.trackPeak = await peakNow();
+  const v = videosUI.of(t).find(x => x.video.src.remote?.plugin === 'plex')?.video; if (!v) return { ...out, error: 'the Plex music video was not matched' };
+  await player.watch(v); await waitFor(() => player.video && player.playing && player.pos() > 0.7 && player.videoEl.videoWidth > 0, 15000); out.videoPeak = await peakNow();
+  out.ok = out.proxied && out.trackPeak > 0.1 && out.videoPeak > 0.1; player.pause(); return out;
+}
 async function selfTestCapture() {
   if (!pluginRuntime.native.includes('capture')) return { skipped: 'not in this build' };
   const n = nativeApi(TAURI, 'capture'), bi = await n.invoke('backend_info'); if (bi.backend !== 'sim') return { skipped: 'backend ' + bi.backend };
@@ -786,6 +842,8 @@ async function selfTest(dir) {
       out.acoustid = { ok: !!got[0]?.fingerprint && got[0].fingerprint.startsWith('AQ') && got[0].duration > 0, duration: got[0]?.duration, error: got[0]?.error };
     } else out.acoustid = { skipped: 'not in this build' };
     out.capture = await selfTestCapture().catch(e => ({ error: String(e?.message || e) }));
+    out.video = await selfTestVideo().catch(e => ({ error: String(e?.message || e) }));
+    out.plex = await selfTestPlex().catch(e => ({ error: String(e?.message || e) }));
     // syncing to a player: pair a card folder that already holds a file of the user's, mirror one track and a playlist onto it,
     // then mirror nothing — bootleg's copy goes, the user's file stays (the shell checks the files on disk afterwards)
     try {
@@ -823,5 +881,5 @@ notes.store.addEventListener('change', () => { if (view === 'albums' && settings
     if (TAURI) openFromOS().catch(e => toast(String(e), true));        // launched by opening a file: it plays before the library finishes loading
     startLibrary().catch(e => toast(String(e), true));      // and, in every case, the library: from the cache at once, then a look for changes
   }
-  window.__bootleg = { metaChosen, listProviders, secrets, mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
+  window.__bootleg = { videosUI, videoLinks, metaChosen, listProviders, secrets, mini, remoteAnn, tagFiles, extensions, paintScreens, outputs, sessionOf, libs, settings, cache, syncAll, notes, lib, player, viz, feed, addSources, show };       // for tests and the desktop self-test
 })();

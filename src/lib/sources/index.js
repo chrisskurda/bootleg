@@ -4,4 +4,4 @@ import { subsonic } from './subsonic.js';
 import { stemserver } from './stemserver.js';
 registerSource(subsonic);
 registerSource(stemserver);
-export { getSource, listSources } from './plugin.js';
+export { getSource, listSources, registerSource, unregisterSource } from './plugin.js';

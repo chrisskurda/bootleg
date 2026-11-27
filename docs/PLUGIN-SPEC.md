@@ -9,7 +9,7 @@ Status: **draft, partly implemented** (2026-11-26). The first plugin built on it
 - these parts of §6: `api.platform`, `api.native.invoke`/`job`, `api.net.fetch`, `api.secrets`, `api.ui.openExternal`, `api.metadata.register` / `lookup` / `providers` (album lookups, the album pane and the tag editor), `api.dialog.folder`, `api.library.import`/`annotate` (with `removeTags`)/`defects.clear`/`roots`, `secret` settings, and defects (stored, timeline bands, the ⚠ badge, `has:defects`)
 - the desktop self-test scenario (§7.3)
 
-**Not implemented yet:** `Media`, `Paths`, `Tags` (§5.3), `api.native.on`, `api.sources.*`, `api.outputs.register`, metadata queries of kind `recording`, `api.media`, `api.devices`, `api.transcode`, and the *Damaged* smart list. The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
+**Not implemented yet:** `Media`, `Paths`, `Tags` (§5.3), `api.native.on`, `api.sources.attach`, `api.outputs.register`, metadata queries of kind `recording`, `api.media`, `api.devices`, `api.transcode`, and the *Damaged* smart list. The built-in portable player sync is the first user of the `device` kind (§6.1), and §9 is the draft of **2.1**.
 
 Spec 1 is what exists today: JS-only extensions ([EXTENSIONS.md](EXTENSIONS.md)) plus the source and output contracts that are compiled into the app ([SOURCE-PLUGINS.md](SOURCE-PLUGINS.md)). Spec 2.0 keeps all of that working and adds:
 
@@ -148,7 +148,7 @@ Spec 2.0 adds:
 | `api.library.roots()` | the library's folders, e.g. as a default place to write into |
 | `api.platform` | `{ os: 'macos'\|'linux'\|'windows'\|'web', arch, appVersion, spec, status }`. `status` is this plugin's level on the current target |
 | `api.native` | present only when the native part is in this build. `invoke(cmd, args) → Promise` (a call to `plugin:bootleg-<id>\|<cmd>`); `job(cmd, args, onEvent) → { id, done: Promise<result>, cancel() }`; `on(event, cb) → unsubscribe` for events the native side pushes (a disc inserted or ejected); `backend` (the active backend's name) |
-| `api.sources.register(source)` | registers a source plugin (the existing contract) for as long as this plugin runs |
+| `api.sources.register(source)` | registers a source plugin (the existing contract, [SOURCE-PLUGINS.md](SOURCE-PLUGINS.md)) for as long as this plugin runs; returns the function that unregisters it. Its connections' tracks leave the library while it is off and come back from the cache when it is on again. Implemented (Jellyfin, Plex). |
 | `api.sources.attach(sourceId, config, { title, transient })` | adds a connection to the current library. A `transient` connection appears while it is present (a disc in the drive) and is not saved. Notes and ratings are keyed by item id as usual, so they come back when the same disc is inserted again |
 | `api.outputs.register(output)` | the existing output contract |
 | `api.metadata.lookup(query)` → `{ candidates, errors }`, `api.metadata.providers` | ask every registered provider (as the album pane does), for a plugin that needs titles, like the Record plugin |

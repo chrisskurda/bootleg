@@ -14,6 +14,8 @@ A music player for **large libraries**, with live visualizers, stem mixing, note
 - **Scrobbling** (plugin, experimental): ListenBrainz and Last.fm, counting only what you really heard, with an offline queue.
 - **Library check** (plugin, desktop, experimental): finds damaged and cut-short files, lossy files posing as lossless, upsampling, padded bit depth and clipping, and verifies CD rips with AccurateRip without the disc.
 - **Album details online** (plugins): MusicBrainz releases with label, catalogue number, genres and covers, and AcoustID to identify albums by their sound; pick the right release and fill in tags from it.
+- **Music videos** from your folders, Jellyfin and Plex, matched to tracks from any source (or linked by hand) and played on Now playing or on a visualizer screen.
+- **Jellyfin and Plex** (plugins, experimental): music and music videos, favourites or ratings both ways, playlists, offline copies.
 - **Record vinyl and tape** (plugin, desktop, experimental): level meters, tracks found at the gaps, click removal, titles from MusicBrainz, 24-bit FLAC into the library.
 - **Sources and outputs are plugins:** Subsonic/OpenSubsonic servers (Navidrome, Airsonic, Gonic) and bootleg stem servers (songs with their stems, grades and playlists) today; DLNA/UPnP casting with album art. Optional **extensions** (a Car Thing remote, a 10-band equalizer) sit behind a small API, can add their own page to the left pane, and are off by default.
 

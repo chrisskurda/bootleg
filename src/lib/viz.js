@@ -42,7 +42,7 @@ export class VizHost {
     if (p.mode === 'deck' && A.stems) window.VisStems.applyClips(A.stems, p.deck.clips, A.t); else window.VisStems.attach(A, []);
     try { w.__META = meta; w.__AUDIO = A; w.__PARAMS = this.params; w.__FX = window.lookFx(this.look); } catch { /* the frame is still loading */ }
     const css = window.lookToCss(this.look, A, now / 1000); if (css !== this._css) { this.frame.style.filter = css; this._css = css; }
-    if (this.screenAlive) this.bc.postMessage({ type: 'frame', A: packFrame(A), meta, params: this.params, look: this.look });
+    if (this.screenAlive) this.bc.postMessage({ type: 'frame', A: packFrame(A), meta, params: this.params, look: this.look, video: this.videoInfo?.() || null });      // video: a music video to show instead (app.js)
     for (const f of this.taps) { try { f(A); } catch { /* a faulty extension must not stop the visualizer */ } }
     this.lastA = A; requestAnimationFrame(t => this._tick(t));
   }

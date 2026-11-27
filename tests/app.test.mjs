@@ -1,6 +1,7 @@
 // End-to-end: build the app, serve it, drive it in Chrome with real files (tagged flac/mp3/m4a with covers + a stem render folder).
 //   node tests/app.test.mjs [--shots DIR]
 import { startMock } from './mock-subsonic.mjs';
+import { startJellyfin } from './mock-jellyfin.mjs';
 import { startStemServer } from './mock-stemserver.mjs';
 import { bstemFrom } from './zipw.mjs';
 import { chromium } from 'playwright-core'; import { spawn, spawnSync } from 'node:child_process'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
@@ -320,6 +321,48 @@ try {
   await ev(() => window.__bootleg.extensions.setEnabled('scrobble', false)); await pg.waitForFunction(() => !window.__bootleg.extensions.running.has('scrobble'));      // (Settings repaints as the plugin restarts, so not by clicking) await pg.unroute('https://api.listenbrainz.org/**');
   await ev(() => window.__bootleg.player.setVolume(0.9));
 
+  // ---- music videos: from a folder, matched to tracks by artist and title, linked by hand, played with their own sound
+  const vdir = path.join(tmp, 'Videos'); fs.mkdirSync(vdir);
+  const clip = (name, freq) => ff('-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=25:duration=4', '-f', 'lavfi', '-i', `sine=frequency=${freq}:duration=4`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', path.join(vdir, name));
+  clip('The Isobars - Low Pressure (Official Video).mp4', 600); clip('Nobody - Unrelated Clip.mp4', 800);
+  await pg.setInputFiles('#folderIn', vdir); await pg.waitForFunction(() => window.__bootleg.lib.videos.length === 2);
+  t('video files become library videos (not tracks), with artist and title from the file name', await ev(() => { const b = window.__bootleg.lib, v = b.videos.find(x => x.artist === 'The Isobars'); return v?.title === 'Low Pressure (Official Video)' && !b.tracks.some(x => /\.mp4$/.test(x.src.name)); }));
+  t('the Videos page appears in the left pane', await pg.locator('.nav[data-view="videos"]').isVisible() && (await pg.locator('#nVideos').innerText()) === '2');
+  await pg.click('.nav[data-view="tracks"]'); await pg.fill('#search', 'Low Pressure'); await pg.locator('#search').dispatchEvent('input');
+  t('a track with a matching video shows 🎬 in the list', await pg.locator('#trackList .row', { hasText: 'Low Pressure' }).locator('.vchip').isVisible().catch(() => false));
+  await pg.fill('#search', ''); await pg.locator('#search').dispatchEvent('input');
+  await ev(async () => { const b = window.__bootleg; await b.player.playList([b.lib.tracks.find(x => x.title === 'Low Pressure')], 0); }); await pg.click('.nav[data-view="now"]');
+  await pg.click('#nowVideoBar button:has-text("Watch the video")');
+  await pg.waitForFunction(() => { const p = window.__bootleg.player; return p.video && p.playing && p.pos() > 0.5 && p.videoEl.videoWidth === 320; }, null, { timeout: 15000 });
+  t('"Watch the video" plays the video, with its sound, on Now playing (the track stays the queue item)', await ev(() => { const p = window.__bootleg.player; return p.item.title === 'Low Pressure' && p.audio === p.videoEl && document.querySelector('#nowVideo video') === p.videoEl && !document.getElementById('nowVideo').hidden; }));
+  t('…the track\'s timeline is hidden while its video plays (another edit, another clock)', await pg.locator('#timeline').isHidden());
+  await pg.click('#nowVideoBar button:has-text("Back to the track")'); await pg.waitForFunction(() => { const p = window.__bootleg.player; return !p.video && p.playing && p.audio === p.audioEl; });
+  t('"Back to the track" plays the track again', await pg.locator('#nowVideo').isHidden());
+  // a visualizer screen shows the linked video (silently) while the track itself plays, and the visualizer again without one
+  const vs = await pg.context().newPage(); vs.on('pageerror', e => errs.push('screen: ' + e.message)); await vs.goto(`http://127.0.0.1:${PORT}/screen.html`);
+  await vs.waitForFunction(() => { const v = document.getElementById('mv'); return !v.hidden && v.muted && v.currentTime > 0.5 && !v.paused && document.getElementById('pack').classList.contains('off'); }, null, { timeout: 15000 }).then(() => t('a visualizer screen shows the track\'s music video, silently, while the track plays', true), e => t('a visualizer screen shows the track\'s music video, silently, while the track plays', false, e.message.split('\n')[0]));
+  await ev(async () => { const b = window.__bootleg; b.settings.vizVideo = false; }); await vs.waitForFunction(() => document.getElementById('mv').hidden && !document.getElementById('pack').classList.contains('off'), null, { timeout: 5000 }).then(() => t('…and the visualizer when that option is off', true), () => t('…and the visualizer when that option is off', false));
+  await ev(() => { window.__bootleg.settings.vizVideo = true; }); await vs.close();
+  await pg.locator('#nowVideoBar input[type=checkbox]').check(); await pg.waitForFunction(() => { const p = window.__bootleg.player; return p.video && p.playing; });
+  await ev(async () => { const b = window.__bootleg; await b.player.playList([b.lib.tracks.find(x => x.title === 'Second Quarter'), b.lib.tracks.find(x => x.title === 'Low Pressure')], 0); });
+  t('video mode: a track without a video plays as usual', await ev(() => !window.__bootleg.player.video));
+  await ev(() => window.__bootleg.player.next()); await pg.waitForFunction(() => { const p = window.__bootleg.player; return p.item.title === 'Low Pressure' && p.video && p.playing; });
+  t('…and the next track with a video plays its video', true);
+  await pg.locator('#nowVideoBar input[type=checkbox]').uncheck(); await pg.waitForFunction(() => !window.__bootleg.player.video);
+  // linking by hand, and turning down an automatic match
+  await ev(() => { const b = window.__bootleg; b.videosUI.linkDialog(b.lib.tracks.find(x => x.title === 'Second Quarter')); });
+  await pg.fill('.vdlg input[type=search]', 'unrelated'); await pg.locator('.vdlg li', { hasText: 'Unrelated Clip' }).locator('button:has-text("Link")').click();
+  await pg.waitForSelector('.vdlg li:has-text("linked by you")'); await pg.click('.vdlg button:has-text("Done")');
+  t('any video can be linked to any track by hand', await ev(() => { const b = window.__bootleg, r = b.videosUI.of(b.lib.tracks.find(x => x.title === 'Second Quarter')); return r.length === 1 && r[0].how === 'linked' && r[0].video.title === 'Unrelated Clip'; }));
+  await ev(() => { const b = window.__bootleg; b.videosUI.linkDialog(b.lib.tracks.find(x => x.title === 'Low Pressure')); }); await pg.click('.vdlg li:has-text("matched by artist") button:has-text("not this one")');
+  await pg.waitForSelector('.vdlg button:has-text("turned down")'); await pg.click('.vdlg button:has-text("Done")');
+  t('an automatic match can be turned down (and is remembered)', await ev(() => { const b = window.__bootleg; return b.videosUI.of(b.lib.tracks.find(x => x.title === 'Low Pressure')).length === 0 && b.videoLinks.hidden.size === 1; }));
+  await ev(() => { const b = window.__bootleg; return b.videoLinks.restore(b.videoLinks.hidden.keys().next().value); });
+  await pg.click('.nav[data-view="videos"]'); await pg.locator('#videoList .vcard', { hasText: 'Unrelated Clip' }).click();
+  await pg.waitForFunction(() => { const p = window.__bootleg.player; return p.item?.kind === 'video' && p.video === p.item && p.playing && p.pos() > 0.3; }, null, { timeout: 15000 });
+  t('a video on the Videos page plays on its own', true);
+  await ev(() => window.__bootleg.player.pause());
+
   // ---- progress while importing a big folder
   const big = path.join(tmp, 'Big'); fs.mkdirSync(big); ff('-f', 'lavfi', '-i', 'sine=frequency=500:duration=1', path.join(tmp, 'one.wav')); for (let i = 0; i < 1500; i++) fs.copyFileSync(path.join(tmp, 'one.wav'), path.join(big, `bulk ${String(i).padStart(4, '0')}.wav`));
   await pg.evaluate(() => { window.__sawProgress = []; const el = document.getElementById('progress'); new MutationObserver(() => { if (!el.hidden) window.__sawProgress.push(document.getElementById('ptext').textContent); }).observe(el, { attributes: true, childList: true, subtree: true, characterData: true }); });
@@ -422,6 +465,31 @@ try {
   mock.state.failStream = true; await pg.click('.nav[data-view="tracks"]'); await pg.locator('#trackList .row', { hasText: 'Fresh Upload' }).dblclick(); await pg.waitForSelector('.toast.bad', { timeout: 15000 });
   t('when a server track cannot be played, the user is told why (never silent)', /Could not play .*Fresh Upload/.test(await pg.locator('.toast.bad').first().innerText()), await pg.locator('.toast.bad').first().innerText());
   mock.state.failStream = false;
+  // ---- a packaged source plugin: Jellyfin (mock server); its music video matches a local track from another library
+  clip('jf-video.mp4', 900);
+  const JA = (Id, Name, ix) => ({ Id, Type: 'Audio', Name, Artists: ['Jelly Band'], AlbumArtist: 'Jelly Band', Album: 'Jam', AlbumId: 'jal', AlbumPrimaryImageTag: 't', IndexNumber: ix, ProductionYear: 2023, RunTimeTicks: 5e7, Container: 'flac', Etag: 'e' + Id, MediaSources: [{ Size: fs.statSync(files.s1).size, Bitrate: 900000 }] });
+  const jf = await startJellyfin({ items: [JA('j1', 'Jam One', 1), JA('j2', 'Jam Two', 2), { Id: 'jv1', Type: 'MusicVideo', Name: 'Server Band - Remote One (Official Video)', Artists: [], RunTimeTicks: 4e7, Container: 'mov,mp4,m4a', Path: '/media/videos/sq.mp4', ImageTags: { Primary: 'p' }, MediaSources: [{ Size: fs.statSync(path.join(vdir, 'jf-video.mp4')).size, MediaStreams: [{ Type: 'Video', Codec: 'h264' }, { Type: 'Audio', Codec: 'aac' }] }] }],
+    files: { j1: files.s1, j2: files.s2, jv1: path.join(vdir, 'jf-video.mp4') }, image: path.join(tmp, 'a.png'), playlists: [{ id: 'jp', name: 'Jelly Mix', items: ['j2', 'j1'] }] });
+  await ev(async () => { const x = window.__bootleg.extensions; x.confirm('jellyfin'); await x.setEnabled('jellyfin', true); });
+  await pg.click('.nav[data-view="settings"]'); await pg.click('#connectOpen-' + sid); await pg.selectOption('.connect select', 'jellyfin');
+  await pg.fill('.connect input[name=url]', jf.url + '/web/index.html'); await pg.fill('.connect input[name=username]', 'tester'); await pg.fill('.connect input[name=password]', 'testpass'); await pg.click('.connect .btn.primary');
+  await pg.waitForFunction(() => window.__bootleg.lib.tracks.filter(x => x.src.remote?.plugin === 'jellyfin').length === 2 && window.__bootleg.lib.videos.some(v => v.src.remote?.plugin === 'jellyfin'), null, { timeout: 20000 });
+  t('a packaged source plugin (Jellyfin) offers itself under "Connect a server", signs in and lists the server\'s tracks', await ev(() => { const j = window.__bootleg.lib.tracks.find(x => x.title === 'Jam One'); return j.artist === 'Jelly Band' && j.album === 'Jam' && j.year === 2023 && j.duration === 5 && /\/Items\/jal\/Images\/Primary/.test(j.coverUrl); }));
+  t('…the token is kept in the secret store, not with the library settings', !(await ev(() => localStorage.getItem('bootleg.libraries'))).includes('tok-tester') && (await ev(() => localStorage.getItem('bootleg.secrets'))).includes('tok-tester'));
+  t('…its music video gets artist and title from "Artist - Title" and is matched to a track from another source (Subsonic)', await ev(() => { const b = window.__bootleg, v = b.lib.videos.find(x => x.src.remote?.plugin === 'jellyfin'), r1 = b.lib.tracks.find(x => x.title === 'Remote One'); return v.artist === 'Server Band' && v.title === 'Remote One (Official Video)' && r1.src.remote.plugin === 'subsonic' && b.videosUI.of(r1).some(r => r.video === v && r.how === 'auto'); }), await ev(() => { const b = window.__bootleg, v = b.lib.videos.find(x => x.src.remote?.plugin === 'jellyfin'), r1 = b.lib.tracks.find(x => x.title === 'Remote One'); return JSON.stringify({ v: v && [v.artist, v.title], r1: r1 && [r1.artist, r1.title, r1.albumArtist, r1.src.remote?.plugin], of: r1 && b.videosUI.of(r1).map(r => [r.how, r.video.title]), all: b.lib.tracks.filter(x => x.remote).map(x => x.title) }); }));
+  await ev(async () => { const b = window.__bootleg; await b.player.playList([b.lib.tracks.find(x => x.title === 'Jam One')], 0); }); await pg.waitForFunction(() => window.__bootleg.player.playing && window.__bootleg.player.pos() > 0.5, null, { timeout: 15000 });
+  t('a Jellyfin track plays', true);
+  await ev(async () => { const b = window.__bootleg; await b.player.setVideoMode(true); await b.player.playList([b.lib.tracks.find(x => x.title === 'Remote One')], 0); });      // (video mode: the track's own stream is never asked for)
+  await pg.waitForFunction(() => { const p = window.__bootleg.player; return p.video && p.playing && p.pos() > 0.5 && p.videoEl.videoWidth === 320; }, null, { timeout: 15000 });
+  t('a Subsonic track plays its Jellyfin music video', true); await ev(() => window.__bootleg.player.setVideoMode(false));
+  for (let i = 0; i < 50 && !(await ev(async () => (await window.__bootleg.notes.store.playlists()).some(p => p.name === 'Jelly Mix'))); i++) await sleep(100);
+  t('the server\'s playlists arrive', await ev(async () => (await window.__bootleg.notes.store.playlists()).some(p => p.name === 'Jelly Mix' && p.items.length === 2)));
+  await ev(() => window.__bootleg.player.pause()); const hitsBefore = jf.state.hits.length;
+  await ev(() => window.__bootleg.extensions.setEnabled('jellyfin', false)); await pg.waitForFunction(() => !window.__bootleg.lib.tracks.some(x => x.src.remote?.plugin === 'jellyfin') && !window.__bootleg.lib.videos.some(x => x.src.remote?.plugin === 'jellyfin'));
+  t('turning the plugin off takes its tracks and videos out of the library (the connection stays)', await ev(() => window.__bootleg.libs.allConnections().some(c => c.conn.plugin === 'jellyfin')));
+  await ev(async () => { const x = window.__bootleg.extensions; await x.setEnabled('jellyfin', true); }); await pg.waitForFunction(() => window.__bootleg.lib.tracks.filter(x => x.src.remote?.plugin === 'jellyfin').length === 2, null, { timeout: 10000 });
+  t('…and turning it on again brings them back from the cache, without asking the server', jf.state.hits.slice(hitsBefore).filter(h => /Items$/.test(h)).length === 0, jf.state.hits.slice(hitsBefore).join(', '));
+  jf.close();
   mock.close();
   // ---- a song in one file (.bstem), and songs from a bootleg stem server
   const fxDir = path.join(lib, 'Renders/fixture-render'), fxStems = fs.readdirSync(path.join(fxDir, 'stems')).filter(f => f.endsWith('.flac')), fxFiles = {};

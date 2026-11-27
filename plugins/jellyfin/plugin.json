@@ -1,0 +1,15 @@
+{
+  "spec": "2.0",
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "version": "0.1.0",
+  "description": "Music and music videos from a Jellyfin server: browse, play, favourites both ways, playlists and offline copies. Videos play on Now playing and are matched to your tracks from any source.",
+  "entry": "index.js",
+  "provides": ["source"],
+  "platforms": {
+    "macos":   { "status": "experimental" },
+    "linux":   { "status": "experimental" },
+    "windows": { "status": "experimental" },
+    "web":     { "status": "experimental" }
+  }
+}

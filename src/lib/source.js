@@ -5,8 +5,9 @@ import { offlineUrl } from './offline-hook.js';
 const norm = p => String(p).replace(/\\/g, '/');
 export const AUDIO_RE = /\.(mp3|flac|m4a|aac|ogg|opus|wav|aif|aiff|caf)$/i;
 export const NFO_RE = /\.nfo$/i;
+export const VIDEO_RE = /\.(mp4|m4v|mkv|webm|mov)$/i;      // music videos (videos.js)
 export const PKG_RE = /\.(bstem|bsong|dawproject)$/i;      // a whole song in one file (lib/stempkg.js)
-export const wanted = name => AUDIO_RE.test(name) || NFO_RE.test(name) || PKG_RE.test(name) || name === 'manifest.json' || name === 'clips.json';
+export const wanted = name => AUDIO_RE.test(name) || VIDEO_RE.test(name) || NFO_RE.test(name) || PKG_RE.test(name) || name === 'manifest.json' || name === 'clips.json';
 
 export function webSource(file, path) {
   let url = null;
