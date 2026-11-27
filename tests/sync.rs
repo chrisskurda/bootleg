@@ -322,3 +322,14 @@ fn a_playlist_with_nothing_on_the_card_is_not_written() {
     apply(&mut dev, &p, &mut (), None).unwrap();
     assert!(!f.file("Music/Playlists/TestPlaylist.m3u8").exists());
 }
+
+#[test]
+fn read_back_hash_matches_what_was_written() {
+    let f = fixture();
+    let p = f.lib.join("x.bin");
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    fs::write(&p, &data).unwrap();
+    let (n, h) = bootleg_sync::apply::read_back_hash(&p).unwrap();
+    assert_eq!(n, data.len() as u64);
+    assert_eq!((n, h), bootleg_sync::hash_file(&p).unwrap());
+}
