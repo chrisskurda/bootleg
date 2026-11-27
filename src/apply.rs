@@ -6,7 +6,7 @@ use crate::manifest::{Entry, Kind};
 use crate::plan::{Op, Plan};
 use crate::{hash_file, hex, io_err, now, Device, Error, Result};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// Progress and cancellation. `()` is a silent, never-cancelled progress.
@@ -36,17 +36,28 @@ pub struct Report {
     pub cancelled: bool,
 }
 
-fn copy_hashing(src: &Path, dest: &Path) -> Result<(u64, String)> {
+/// Copy `src` (or just `range` = (offset, length) of it) to `dest`, hashing what was written.
+fn copy_hashing(src: &Path, range: Option<(u64, u64)>, dest: &Path) -> Result<(u64, String)> {
     let mut i = std::fs::File::open(src).map_err(|e| io_err(src, e))?;
+    let mut left = u64::MAX;
+    if let Some((off, len)) = range {
+        i.seek(SeekFrom::Start(off)).map_err(|e| io_err(src, e))?;
+        left = len;
+    }
     let mut o = std::fs::File::create(dest).map_err(|e| io_err(dest, e))?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 1024 * 1024];
     let mut n = 0u64;
-    loop {
-        let k = i.read(&mut buf).map_err(|e| io_err(src, e))?;
+    while left > 0 {
+        let want = buf.len().min(left.min(usize::MAX as u64) as usize);
+        let k = i.read(&mut buf[..want]).map_err(|e| io_err(src, e))?;
         if k == 0 {
+            if range.is_some() {
+                return Err(Error::Refused(format!("{}: ends {left} bytes before the packaged file does", src.display())));
+            }
             break;
         }
+        left -= k as u64;
         o.write_all(&buf[..k]).map_err(|e| io_err(dest, e))?;
         h.update(&buf[..k]);
         n += k as u64;
@@ -124,7 +135,7 @@ pub fn apply(dev: &mut Device, plan: &Plan, progress: &mut dyn Progress, transco
                 prune_empty(dev, path);
                 r.deleted += 1;
             }
-            Op::Copy { track, src, dest, src_fp, transcode, .. } => {
+            Op::Copy { track, src, range, dest, src_fp, transcode, .. } => {
                 progress.step(i, total, &format!("copy {dest}"));
                 let abs = dev.abs(dest);
                 let tmp = tmp_of(&abs);
@@ -133,7 +144,7 @@ pub fn apply(dev: &mut Device, plan: &Plan, progress: &mut dyn Progress, transco
                         std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
                     }
                     let out = match transcode {
-                        None => copy_hashing(src, &tmp)?,
+                        None => copy_hashing(src, *range, &tmp)?,
                         Some(target) => {
                             let t = transcoder.ok_or_else(|| Error::Refused("no transcoder available".into()))?;
                             t.transcode(src, &tmp, target).map_err(Error::Refused)?;

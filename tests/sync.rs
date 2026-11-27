@@ -38,6 +38,7 @@ impl Fixture {
             size: bytes.len() as u64,
             src_fp: format!("{}:{}", bytes.len(), bytes.first().copied().unwrap_or(0)),
             codec: rel.rsplit('.').next().unwrap().to_lowercase(),
+            range: None,
         }
     }
     fn file(&self, rel: &str) -> PathBuf {
@@ -151,7 +152,7 @@ fn hand_built_plan_cannot_touch_foreign_files() {
     p.ops.push(Op::Delete { path: "Music/keep.mp3".into(), size: 4 });
     assert!(matches!(apply(&mut dev, &p, &mut (), None), Err(Error::Refused(_))));
     let it = f.track("keep.mp3", b"overwrite!");
-    p.ops = vec![Op::Copy { track: it.track, src: it.src, dest: "Music/keep.mp3".into(), size: 10, src_fp: "x".into(), transcode: None, replaces: false }];
+    p.ops = vec![Op::Copy { track: it.track, src: it.src, range: None, dest: "Music/keep.mp3".into(), size: 10, src_fp: "x".into(), transcode: None, replaces: false }];
     assert!(matches!(apply(&mut dev, &p, &mut (), None), Err(Error::Refused(_))));
     assert_eq!(fs::read(f.file("Music/keep.mp3")).unwrap(), b"keep");
 }
@@ -280,4 +281,44 @@ fn outbox_and_players_round_trip() {
     let list = players::list(&f.vol);
     assert_eq!(list.len(), 1);
     assert!(list[0].last_seen > 0);
+}
+
+#[test]
+fn copies_a_byte_range_out_of_a_package() {
+    let f = fixture();
+    let mut dev = Device::init(&f.vol, "Card", "generic", Mode::Add, "Music").unwrap();
+    // a fake package: 7 bytes of header, the 5-byte "audio" entry, then a trailer
+    let pkg = f.lib.join("song.bstem");
+    fs::write(&pkg, b"HEADER!audioTRAILER").unwrap();
+    let it = Item { track: "pkg:song".into(), src: pkg.clone(), rel: "Stem sets/song/mix.flac".into(), size: 5, src_fp: "19:1@7+5".into(), codec: "flac".into(), range: Some((7, 5)) };
+    let p = plan(&dev, &[it.clone()], &[], &BIG, &PlanOptions { can_transcode: true }).unwrap();
+    let r = apply(&mut dev, &p, &mut (), None).unwrap();
+    assert_eq!(r.copied, 1, "{:?}", r.failed);
+    assert_eq!(fs::read(f.file("Music/Stem sets/song/mix.flac")).unwrap(), b"audio");
+    assert!(dev.verify().unwrap().changed.is_empty());
+
+    // a range past the end of the file fails that one copy, and nothing half-written is left
+    let short = Item { track: "pkg:short".into(), rel: "Stem sets/short/mix.flac".into(), range: Some((15, 50)), size: 50, src_fp: "x".into(), ..it.clone() };
+    let p = plan(&dev, &[short], &[], &BIG, &PlanOptions::default()).unwrap();
+    let r = apply(&mut dev, &p, &mut (), None).unwrap();
+    assert_eq!((r.copied, r.failed.len()), (0, 1));
+    assert!(!f.file("Music/Stem sets/short/mix.flac").exists());
+
+    // a ranged source the player can't play is skipped, not handed to a transcoder (which needs a whole file)
+    let wav = Item { track: "pkg:wav".into(), rel: "Stem sets/w/mix.caf".into(), codec: "caf".into(), ..it };
+    let p = plan(&dev, &[wav], &[], &BIG, &PlanOptions { can_transcode: true }).unwrap();
+    assert!(matches!(p.skipped.as_slice(), [(_, Skip::NeedsTranscode)]), "{:?}", p.skipped);
+}
+
+#[test]
+fn a_playlist_with_nothing_on_the_card_is_not_written() {
+    let f = fixture();
+    let mut dev = Device::init(&f.vol, "Card", "generic", Mode::Add, "Music").unwrap();
+    // its tracks are on a server: the desktop sends the playlist but no files for them
+    let pl = PlaylistSpec { name: "TestPlaylist".into(), tracks: vec!["file:subsonic:a/1#".into(), "file:subsonic:a/2#".into()] };
+    let p = plan(&dev, &[], &[pl], &BIG, &PlanOptions::default()).unwrap();
+    assert!(p.ops.is_empty(), "{:?}", p.ops);
+    assert!(matches!(p.skipped.as_slice(), [(k, Skip::EmptyPlaylist)] if k == "playlist:TestPlaylist"), "{:?}", p.skipped);
+    apply(&mut dev, &p, &mut (), None).unwrap();
+    assert!(!f.file("Music/Playlists/TestPlaylist.m3u8").exists());
 }
