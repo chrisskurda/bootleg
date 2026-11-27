@@ -287,13 +287,20 @@ async function syncConnection(conn, L) {
   }
   finally { scan.on = false; }
 }
-let syncing = false;
-async function syncAll(quiet = false) {
-  if (syncing || (!TAURI && !libs.allConnections().length)) return; syncing = true; let added = 0, removed = 0;
+// One sync at a time. A request that comes while one runs (e.g. "check for changes" during the scan on start) waits
+// for it and then runs once more, so changes made meanwhile are not missed; several such requests share that one run.
+let syncing = null, syncAgain = null;
+function syncAll(quiet = false) {
+  if (!TAURI && !libs.allConnections().length) return Promise.resolve();
+  if (syncing) return syncAgain ||= syncing.then(() => { syncAgain = null; return syncAll(quiet); });
+  return syncing = syncOnce(quiet).finally(() => { syncing = null; });
+}
+async function syncOnce(quiet) {
+  let added = 0, removed = 0;
   try { for (const { conn, lib: L } of libs.allConnections()) { try { const r = await syncConnection(conn, L); added += r.added; removed += r.removed; } catch (e) { toast(`${conn.title}: ${e.message || e}`, true); } } }
   catch { /* handled per connection */ }
   try { if (TAURI) for (const { root, lib: L } of libs.allRoots()) { try { const before = lib.tracks.length, srcs = await scanFolder(root, 'Checking for changes in'); lib.add(srcs, L.id); removed += lib.removeMissing(root, new Set(srcs.map(x => x.path)), L.id); added += Math.max(0, lib.tracks.length - before); await cache.putIndex(root, srcs.map(x => ({ path: x.path, size: x.size, mtime: x.mtime }))); } catch (e) { console.warn('could not rescan', root, e); } } }
-  finally { syncing = false; }
+  finally { /* syncing is cleared by syncAll */ }
   if (!quiet || added || removed) toast(added || removed ? `Library updated: ${added} new, ${removed} removed` : 'Library is up to date'); renderAll(); if (view === 'settings') paintSettings();
 }
 

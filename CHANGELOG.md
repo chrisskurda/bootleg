@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Plan and plugin spec for **syncing to portable players** (USB-storage players, SD cards, bootleg-pod handhelds): paired players and media, add / mirror / fill modes, and bootleg only ever replacing or deleting files it put there. Plugin spec 2.0 gains `device` handlers and a shared transcoder; the spec 2.1 draft adds helper processes and an experimental-plugin flag. An experimental iPod plugin is on the roadmap.
 
 ### Fixed
+- "Check for changes" while the library was already syncing (for example during the scan on start) did nothing; it now waits for that sync and runs again, so changes made on the server meanwhile are picked up. This was also the intermittent browser-test failure in CI.
 - Devices: a sync that copies nothing now says why. A card with no playlists chosen asks for some; playlist tracks the open library doesn't have, playlists that were renamed or deleted, and server tracks are listed under “left out”, which opens by itself when nothing is copied. A playlist none of whose tracks reached the card is no longer written to it as an empty file.
 
 ## [0.6.0] - 2026-11-26
