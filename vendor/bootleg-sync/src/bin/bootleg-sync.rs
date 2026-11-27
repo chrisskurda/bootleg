@@ -257,6 +257,7 @@ fn main() {
             }
             let r = apply(&mut d, &p, &mut Bar, None).unwrap_or_else(|e| die(e));
             println!("copied {} ({}), deleted {}, playlists {}", r.copied, human(r.bytes), r.deleted, r.playlists);
+            if r.rewritten > 0 { println!("warning: {} file(s) read back wrong and were written again: test this medium (e.g. f3 / h2testw)", r.rewritten); }
             for (path, e) in &r.failed {
                 println!("FAILED {path}: {e}");
             }

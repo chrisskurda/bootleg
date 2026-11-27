@@ -33,6 +33,8 @@ pub struct Report {
     pub bytes: u64,
     /// (path, error); the sync carries on past single-file failures
     pub failed: Vec<(String, String)>,
+    /// files that read back wrong once and were written again (a medium that does this is worth testing)
+    pub rewritten: usize,
     pub cancelled: bool,
 }
 
@@ -63,6 +65,33 @@ fn copy_hashing(src: &Path, range: Option<(u64, u64)>, dest: &Path) -> Result<(u
         n += k as u64;
     }
     o.sync_all().map_err(|e| io_err(dest, e))?;
+    Ok((n, hex(&h.finalize())))
+}
+
+/// Hash a file as the medium has it now: past this computer's cache (macOS F_NOCACHE; Linux drops the file's clean
+/// cached pages first), so a write the card got wrong is seen, not the copy still in memory.
+pub fn read_back_hash(p: &Path) -> Result<(u64, String)> {
+    use std::os::unix::io::AsRawFd;
+    let mut f = std::fs::File::open(p).map_err(|e| io_err(p, e))?;
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::fcntl(f.as_raw_fd(), libc::F_NOCACHE, 1);
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    let mut n = 0u64;
+    loop {
+        let k = f.read(&mut buf).map_err(|e| io_err(p, e))?;
+        if k == 0 {
+            break;
+        }
+        h.update(&buf[..k]);
+        n += k as u64;
+    }
     Ok((n, hex(&h.finalize())))
 }
 
@@ -143,12 +172,26 @@ pub fn apply(dev: &mut Device, plan: &Plan, progress: &mut dyn Progress, transco
                     if let Some(parent) = abs.parent() {
                         std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
                     }
-                    let out = match transcode {
-                        None => copy_hashing(src, *range, &tmp)?,
-                        Some(target) => {
-                            let t = transcoder.ok_or_else(|| Error::Refused("no transcoder available".into()))?;
-                            t.transcode(src, &tmp, target).map_err(Error::Refused)?;
-                            hash_file(&tmp)?
+                    // write, then read it back from the medium; a medium that stores it wrongly gets two more tries
+                    let mut tries = 0;
+                    let out = loop {
+                        tries += 1;
+                        let out = match transcode {
+                            None => copy_hashing(src, *range, &tmp)?,
+                            Some(target) => {
+                                let t = transcoder.ok_or_else(|| Error::Refused("no transcoder available".into()))?;
+                                t.transcode(src, &tmp, target).map_err(Error::Refused)?;
+                                hash_file(&tmp)?
+                            }
+                        };
+                        if read_back_hash(&tmp)? == out {
+                            if tries > 1 {
+                                r.rewritten += 1;
+                            }
+                            break out;
+                        }
+                        if tries == 3 {
+                            return Err(Error::Refused("the medium keeps storing this file wrongly (it reads back different from what was written): the card or drive may be failing".into()));
                         }
                     };
                     std::fs::rename(&tmp, &abs).map_err(|e| io_err(&abs, e))?;
