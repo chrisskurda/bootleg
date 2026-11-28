@@ -39,7 +39,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Playlists: find by name or by what's in them.** Search playlists by name or by a track, artist or album they contain (the matching tracks are shown and highlighted), show only mine or the servers', sort by name, size or last change; every playlist shows its main artists, size and length. Long lists load 100 at a time. The same search picks a device card's playlists, which are now listed in priority order (↑ ↓).
 - Plan and plugin spec for **syncing to portable players** (USB-storage players, SD cards, bootleg-pod handhelds): paired players and media, add / mirror / fill modes, and bootleg only ever replacing or deleting files it put there. Plugin spec 2.0 gains `device` handlers and a shared transcoder; the spec 2.1 draft adds helper processes and an experimental-plugin flag. An experimental iPod plugin is on the roadmap.
 
+### Changed
+- **Performance pass** (measured with `npm run perf`: 20,000 tracks, CPU slowed 4×):
+  - The queue draws only the rows in view, and nothing while its drawer is closed. Playing from the track list makes the whole list the queue, which used to put a row per track in the page and rebuild them all on every play, pause, skip and shuffle: with 20,000 tracks, starting playback took 725 ms and a pause 550 ms. Both now take under 40 ms.
+  - A hidden visualizer costs nothing. The pack is loaded when the visualizer is first shown (it was being loaded at every start), and it stops drawing while you are on another page or the Now playing tile is scrolled away.
+  - Sorting the library is about four times faster (100,000 tracks: 210 ms to 50 ms), so the lists keep up while tags are read; the order is unchanged.
+  - The cached library loads with fewer redraws, the player bar's clock and seek bar are only touched when they change, and Settings counts the cache instead of loading all of it.
+
 ### Fixed
+- Adding a very large list to the queue (more than 65,536 tracks: “+ queue” or *Build a queue* on a whole library) or dropping a folder with that many files failed on the desktop. Both work at any size now.
 - Player bar: a long album name no longer pushes the cover, title and stars off the left edge of the window. The line is cut short with "…" instead.
 - "Check for changes" while the library was already syncing (for example during the scan on start) did nothing; it now waits for that sync and runs again, so changes made on the server meanwhile are picked up. This was also the intermittent browser-test failure in CI.
 - Devices: a sync that copies nothing now says why. A card with no playlists chosen asks for some; playlist tracks the open library doesn't have, playlists that were renamed or deleted, and server tracks are listed under “left out”, which opens by itself when nothing is copied. A playlist none of whose tracks reached the card is no longer written to it as an empty file.

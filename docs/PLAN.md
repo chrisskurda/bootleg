@@ -88,7 +88,19 @@ Measured with `npm run perf` (20,000 synthetic tracks, CPU throttled 4× to imit
 | start from cache, 30k tracks | — | 0.4 s (loaded in slices) |
 
 What changed: virtualized lists (tracks, album list, split list; grid renders in chunks), memoized sort/albums/search keyed by a data version, adaptive redraw throttle while tags stream in, lazy `convertFileSrc`, the cache loads in chunks after the first paint, the visualizer pack page loads only when first shown, hidden views don't repaint, Rust scanner + Rust tag reader. The page-side tag reader remains for the web build and as the fallback for formats lofty can't read.
-Not done yet: queue and Notes cards aren't virtualized; web build still reads tags on the main thread (a Worker would help); tag/cover reading could be prioritised for what is on screen.
+Second pass (2026-11-28, unreleased; same benchmark plus a profile of playback with the demo library):
+
+| | before | after |
+|---|---|---|
+| play from the track list, 20k tracks (throttled) | 725 ms | ~40 ms |
+| pause / play / shuffle with a 20k queue (throttled) | 200–550 ms | 10–20 ms |
+| DOM nodes while playing from a 20k list | 121,000 | ~900 |
+| switching back to Tracks / search keystroke (throttled) | 199 ms / 94 ms (had crept up) | 7 ms / 16 ms |
+| pack frames drawn while the visualizer is hidden | 60 per second | 0 |
+| sort, 100k shuffled tracks | 210 ms | ~50 ms |
+
+What changed: the queue is a virtual list and is not drawn while its drawer is closed; the visualizer pack is no longer loaded at startup (`lastPing` started at 0, so a screen looked "alive" for the first 6 seconds) and its frame loop is held while the stage is hidden (the host wraps the frame's `requestAnimationFrame`; the vendored runtime is untouched); the sort ranks each distinct artist and album once with the collator and then compares numbers; redraws during the chunked cache load are capped at four a second; the per-frame player bar loop writes only what changed; cache statistics use `count()`. `npm run perf` now also fails if the queue is not virtualized or a player event is slow, and the app test checks the hidden visualizer draws no frames.
+Not done yet: Notes cards aren't virtualized; the DJ panel redraws both waveforms every frame while DJ mode is on; web build still reads tags on the main thread (a Worker would help); tag/cover reading could be prioritised for what is on screen; the release profile is `opt-level = "s"` (size) and has not been compared with `3` for tag reading.
 
 ## Stem sets in the library (v0.7)
 A folder of stems is **one library item** — the piece of music — never its parts. Detected layouts: (1) a `stems/` folder of audio (manifest.json / clips.json / mix.* beside it optional), including nested ones with no manifest; (2) a loose folder whose audio is mostly stem-named (kick, bass, pad, bed, drums, …), optionally with musicset.json and mix.*. Ordinary albums are left alone (stem words must be the whole file name, and ≥60% of the folder). Sets appear in Tracks (with a ♫ stems badge), the Stem renders view and search; a lone `mix.wav` takes its folder's name.

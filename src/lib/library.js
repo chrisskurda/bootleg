@@ -214,7 +214,20 @@ export class Library extends EventTarget {
   sortedTracks() { return this._memoed('sorted', () => this._sort()); }
   // tracks and stem sets together: this is what the lists show (a stem set is one item; its parts never appear)
   get visibleItems() { return this.includeRenders ? this._memoed('items', () => [...this.visibleTracks, ...this.visibleRenders]) : this.visibleTracks; }
-  _sort() { return this.visibleItems.slice().sort((a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) { const c = typeof x[i] === 'number' ? x[i] - y[i] : collator.compare(x[i], y[i]); if (c) return c; } return 0; }); }
+  // The order of sortKey (artist, album, disc, track, title). Collation is the slow part, so each distinct artist and album
+  // is ranked once and the items are then compared by number; only titles within one album position are collated.
+  _sort() {
+    const items = this.visibleItems, n = items.length, k = new Float64Array(n * 4), idx = new Array(n);
+    const ranks = get => { const u = [...new Set(items.map(get))].sort(collator.compare), m = new Map(); let r = 0; for (let i = 0; i < u.length; i++) { if (i && collator.compare(u[i - 1], u[i])) r++; m.set(u[i], r); } return m; };
+    const ra = ranks(t => t.artist || ''), rl = ranks(t => t.album || '');
+    for (let i = 0; i < n; i++) {
+      const t = items[i], d = t.disc || 0, tr = t.track || 0; if (typeof d !== 'number' || typeof tr !== 'number') return this._sortPlain(items);      // disc/track as text: compare them as text
+      k[4 * i] = ra.get(t.artist || ''); k[4 * i + 1] = rl.get(t.album || ''); k[4 * i + 2] = d; k[4 * i + 3] = tr; idx[i] = i;
+    }
+    idx.sort((x, y) => k[4 * x] - k[4 * y] || k[4 * x + 1] - k[4 * y + 1] || k[4 * x + 2] - k[4 * y + 2] || k[4 * x + 3] - k[4 * y + 3] || collator.compare(items[x].title || '', items[y].title || '') || x - y);
+    return idx.map(i => items[i]);
+  }
+  _sortPlain(items) { return items.slice().sort((a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) { const c = typeof x[i] === 'number' ? x[i] - y[i] : collator.compare(x[i], y[i]); if (c) return c; } return 0; }); }
   search(list, q) { q = q.trim().toLowerCase(); if (!q) return list; if (this._sq && this._sq.list === list && this._sq.q === q) return this._sq.out; const w = q.split(/\s+/), out = list.filter(t => { const h = t._hay ||= [t.title, t.artist, t.album, t.genre, t.kind === 'render' ? t.dir : t.src?.name, t.dir, t.kind === 'render' ? 'stems' : ''].join(' ').toLowerCase(); return w.every(x => h.includes(x)); }); this._sq = { list, q, out }; return out; }
   albums() { return this._memoed('albums', () => this._albums()); }
   _albums() { const m = new Map(); for (const t of this.sortedTracks()) { const k = (t.albumArtist || t.artist || '') + '\u0000' + (t.album || ''); if (!t.album) continue; if (!m.has(k)) m.set(k, { key: k, album: t.album, artist: t.albumArtist || t.artist, coverUrl: t.coverUrl, tracks: [] }); const a = m.get(k); a.tracks.push(t); a.coverUrl ||= t.coverUrl; } return [...m.values()]; }

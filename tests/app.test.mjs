@@ -31,6 +31,7 @@ try {
   await pg.goto(`http://127.0.0.1:${PORT}/`); await pg.waitForFunction(() => window.__bootleg && window.__bootleg.viz.packs.length > 30);
   t('app starts, packs listed from the vendored visualizer', (await ev(() => window.__bootleg.viz.packs.length)) > 30); t('web build is labelled', (await pg.locator('#sys').innerText()) === 'web');
   t('empty state invites adding music', await pg.locator('#emptyTracks').isVisible());
+  t('the visualizer pack is not loaded before the visualizer is first shown', (await ev(() => document.querySelector('#vizStage iframe').getAttribute('src'))) === null);
 
   // ---- library
   await pg.setInputFiles('#folderIn', lib); await pg.waitForFunction(() => window.__bootleg.lib.tracks.length === 3 && window.__bootleg.lib.renders.length === 1 && window.__bootleg.lib.tracks.every(x => x.tagged) && !document.getElementById('status').textContent.includes('Reading'), null, { timeout: 30000 });
@@ -205,6 +206,10 @@ try {
   await pg.locator('#vizStage').hover(); await pg.click('#vizFloat'); await pg.click('.nav[data-view="tracks"]'); await sleep(200);
   t('the mini player floats over other pages when pinned', await ev(() => { const s = document.getElementById('vizStage'); return !s.hidden && s.dataset.mode === 'float'; }) && (await ev(() => window.__bootleg.viz.running)));
   await pg.locator('#vizStage').hover(); await pg.click('#vizFloat'); await sleep(100); t('…and goes away when unpinned', await ev(() => document.getElementById('vizStage').hidden));
+  // a hidden visualizer costs nothing: the pack's own frame loop is held, and picks up again when the stage shows
+  const packFrames = () => ev(async () => { const w = document.querySelector('#vizStage iframe').contentWindow, o = w.__seek; let n = 0; w.__seek = x => { n++; return o(x); }; await new Promise(r => setTimeout(r, 600)); w.__seek = o; return n; });
+  const hid = await packFrames(); await pg.click('.nav[data-view="viz"]'); await sleep(200); const vis = await packFrames(); await pg.click('.nav[data-view="tracks"]'); await sleep(200);
+  t('the pack stops drawing while the visualizer is hidden, and draws again when shown', hid === 0 && vis > 5, `${hid} hidden, ${vis} shown`);
   await pg.click('.nav[data-view="now"]'); await ev(() => window.__bootleg.player.play());
   // ---- the mini player window (mini.html): what is playing, and a remote for the player
   const mp = await pg.context().newPage(); mp.on('pageerror', e => errs.push('mini: ' + e.message)); await mp.goto(`http://127.0.0.1:${PORT}/mini.html`);

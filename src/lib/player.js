@@ -54,9 +54,10 @@ export class Player extends EventTarget {
   // ---- queue
   _rebuild() { const idx = this.queue.map((_, i) => i); if (this.shuffle) { for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; } const k = idx.indexOf(this.index); if (k > 0) { idx.splice(k, 1); idx.unshift(this.index); } } this.order = idx; }
   async playList(items, start = 0) { if (this.dj) return this.djLoadIdle(items[start]); this.queue = items.slice(); this.index = Math.max(0, Math.min(start, items.length - 1)); this._rebuild(); await this._playCurrent(); }
+  _insert(at, items) { this.queue = this.queue.slice(0, at).concat(items, this.queue.slice(at)); }      // not splice(at, 0, ...items): a whole library as arguments overflows the stack (WebKit stops at 65,536)
   // Adds to the queue. Starts playing (and returns true) when there was nothing to continue: an empty queue, or one that ran out.
   enqueue(items, next = false) {
-    if (!items.length) return false; const at = next ? this.index + 1 : this.queue.length; this.queue.splice(at, 0, ...items);
+    if (!items.length) return false; const at = next ? this.index + 1 : this.queue.length; this._insert(at, items);
     if (!this.dj && (this.index < 0 || this.ended)) { this.index = this.index < 0 ? 0 : at; this._rebuild(); this._playCurrent(); return true; }
     if (this.index < 0) this.index = 0;
     this._invalidate(); this._rebuild(); this._emit(); return false;
@@ -65,7 +66,7 @@ export class Player extends EventTarget {
   async playNow(items, start = 0) {
     if (!items.length) return; if (this.dj) return this.djLoadIdle(items[Math.max(0, Math.min(start, items.length - 1))]);
     if (this.index < 0 || !this.queue.length) return this.playList(items, start);
-    const at = this.index + 1; this.queue.splice(at, 0, ...items); this.index = at + Math.max(0, Math.min(start, items.length - 1)); this._rebuild(); await this._playCurrent();
+    const at = this.index + 1; this._insert(at, items); this.index = at + Math.max(0, Math.min(start, items.length - 1)); this._rebuild(); await this._playCurrent();
   }
   remove(i) {
     if (i === this.index && !this.dj) { this.queue.splice(i, 1); this.index = Math.min(i, this.queue.length - 1); this._rebuild(); if (this.index >= 0) this._playCurrent(); else this.stop(); return; }

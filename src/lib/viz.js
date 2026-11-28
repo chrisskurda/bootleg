@@ -5,10 +5,10 @@ import { control, defaultsOf, LOOKS, h } from './controls.js';
 const PACKS = '/vendor/bootleg-vizualizer/packs/';
 export class VizHost {
   constructor({ stage, packSelect, paramsEl, lookEl, feed, player }) {
-    Object.assign(this, { stage, packSelect, paramsEl, lookEl, feed, player }); this.frame = stage.querySelector('iframe'); this.packs = []; this.pack = null; this.params = {}; this.look = { ...window.LOOK_DEFAULTS }; this.running = false; this._last = performance.now(); this._css = '';
+    Object.assign(this, { stage, packSelect, paramsEl, lookEl, feed, player }); this.frame = stage.querySelector('iframe'); this.frame.addEventListener('load', () => this._gate()); this.packs = []; this.pack = null; this.params = {}; this.look = { ...window.LOOK_DEFAULTS }; this.running = false; this._last = performance.now(); this._css = '';
     this.zero = { s: new Float32Array(64), w: new Float32Array(128) };
     // screens: other windows showing this visualizer (see screen-link.js)
-    this.taps = new Set(); this.lastPing = 0; this.bc = new BroadcastChannel(CHANNEL); this.bc.onmessage = e => { if (e.data?.type === 'hello') { this.lastPing = performance.now(); this._sendPack(); this._applySrc(); if (!this.running) this._kick(); } else if (e.data?.type === 'ping') this.lastPing = performance.now(); };
+    this.taps = new Set(); this.lastPing = -Infinity; this.bc = new BroadcastChannel(CHANNEL); this.bc.onmessage = e => { if (e.data?.type === 'hello') { this.lastPing = performance.now(); this._sendPack(); this._applySrc(); if (!this.running) this._kick(); } else if (e.data?.type === 'ping') this.lastPing = performance.now(); };
   }
   // Subscribe to every analysed frame (extensions). Returns the function that unsubscribes. Keeps the loop running while subscribed.
   onFrame(cb) { this.taps.add(cb); this._kick(); return () => this.taps.delete(cb); }
@@ -29,8 +29,19 @@ export class VizHost {
   }
   resetLook() { Object.assign(this.look, window.LOOK_DEFAULTS); this.lookEl.replaceChildren(...LOOKS.map(([k, mn, mx, st, lb]) => control(this.look, k, { type: 'number', min: mn, max: mx, step: st, label: lb }))); }
   _applySrc() { if (this._want && this.frame.getAttribute('src') !== this._want) this.frame.src = this._want; }
-  start() { this._applySrc(); if (this.running) return; this.running = true; if (!this._ticking) { this._ticking = true; this._last = performance.now(); requestAnimationFrame(t => this._tick(t)); } }
-  stop() { this.running = false; if (this.screenAlive || this.taps.size) this._kick(); }       // a screen is still watching: keep analysing even when this view is hidden
+  // A pack draws on its own requestAnimationFrame loop for as long as its page lives, shown or not (a full canvas, 60 times a
+  // second). While the stage is hidden (another page, or the Now playing tile scrolled away), the frame's requestAnimationFrame holds the callbacks back; showing it hands them on.
+  _gate() {
+    let w; try { w = this.frame.contentWindow; if (!w || !w.document || !w.requestAnimationFrame) return; } catch { return; }      // no page yet
+    if (!w.__hostRaf) {
+      const real = w.requestAnimationFrame.bind(w), cancel = w.cancelAnimationFrame.bind(w), held = new Map(), g = w.__hostRaf = { real, held, n: 0 };
+      w.requestAnimationFrame = cb => { if (!this.stage.hidden) return real(cb); held.set(--g.n, cb); return g.n; };
+      w.cancelAnimationFrame = id => (id < 0 ? held.delete(id) : cancel(id));
+    }
+    if (!this.stage.hidden) { const { real, held } = w.__hostRaf, cbs = [...held.values()]; held.clear(); for (const cb of cbs) real(cb); }
+  }
+  start() { this._applySrc(); if (this.running) { this._gate(); return; } this.running = true; this._gate(); if (!this._ticking) { this._ticking = true; this._last = performance.now(); requestAnimationFrame(t => this._tick(t)); } }
+  stop() { this.running = false; this._gate(); if (this.screenAlive || this.taps.size) this._kick(); }       // a screen is still watching: keep analysing even when this view is hidden
   fullscreen() { (this.stage.requestFullscreen || this.stage.webkitRequestFullscreen).call(this.stage); }
   _tick(now) {
     if (!this.running && !this.screenAlive && !this.taps.size) { this._ticking = false; return; } const dt = Math.max(0, Math.min(0.1, (now - this._last) / 1000)); this._last = now;

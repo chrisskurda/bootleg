@@ -20,11 +20,14 @@ const r = await pg.evaluate(async N => {
   const b = performance.now(); document.querySelector('.nav[data-view="tracks"]').click(); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))); out.backToTracks = Math.round(performance.now() - b);
   const s = document.getElementById('search'), c = performance.now(); s.value = 'beta artist 12'; s.dispatchEvent(new Event('input')); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))); out.searchTyped = Math.round(performance.now() - c);
   const list = document.getElementById('trackList'), sc = list.closest('#main') || list.parentElement, d = performance.now(); sc.scrollTop = 5000; await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30))); out.scroll = Math.round(performance.now() - d);
+  // playing from the track list makes the whole list the queue: the queue drawer and every player event must not pay for its length
+  document.getElementById('search').value = ''; document.getElementById('search').dispatchEvent(new Event('input')); document.getElementById('qToggle').click(); B.player.queue = B.lib.sortedTracks().slice(); B.player.index = 0;
+  const e = performance.now(); B.player.dispatchEvent(new Event('change')); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))); out.playerEvent = Math.round(performance.now() - e); out.queueRowsInDom = document.querySelectorAll('#queueList .qi').length; out.queueDom = document.getElementsByTagName('*').length;
   out.longTasksOver100ms = window.__long.filter(x => x > 100).length; out.longestTask = Math.round(Math.max(0, ...window.__long)); out.totalLongMs = Math.round(window.__long.reduce((x, y) => x + y, 0));
   return out;
 }, N);
 console.log(`tracks=${N} cpu×${CPU}`); console.table(r);
 await browser.close(); srv.kill();
 const budget = { sortedTracksAgain: 5, albumsAgain: 5, firstRows: 1500, albumsView: 1500, longestTask: 800 }, bad = [];
-if ((r['sortedTracks again'] ?? 0) > budget.sortedTracksAgain) bad.push('repeated sort not cached'); if ((r['albums again'] ?? 0) > budget.albumsAgain) bad.push('repeated albums() not cached'); if (r.rowsInDom > 400) bad.push('track list is not virtualized'); if (r.longestTask > budget.longestTask * CPU) bad.push('a task blocked the UI for ' + r.longestTask + ' ms');
+if ((r['sortedTracks again'] ?? 0) > budget.sortedTracksAgain) bad.push('repeated sort not cached'); if ((r['albums again'] ?? 0) > budget.albumsAgain) bad.push('repeated albums() not cached'); if (r.rowsInDom > 400) bad.push('track list is not virtualized'); if (r.queueRowsInDom > 200) bad.push('the queue is not virtualized'); if (r.playerEvent > 60 * CPU) bad.push('a player event took ' + r.playerEvent + ' ms'); if (r.longestTask > budget.longestTask * CPU) bad.push('a task blocked the UI for ' + r.longestTask + ' ms');
 if (bad.length) { console.error('PERF BUDGET FAILED:', bad.join('; ')); process.exit(1); } console.log('within budget');

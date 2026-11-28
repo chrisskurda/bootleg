@@ -256,7 +256,7 @@ $('#libSel').onchange = e => { libs.setActive(e.target.value); lib.scope = libs.
 // Desktop: show the whole library from the cache immediately, then look for changes in the background.
 const sessionOf = r => { const c = libs.connection(r.conn), p = getSource(r.plugin); return c && p ? p.session(fullConfig(secrets, c)) : null; };
 async function loadChunked(srcs, libId) {      // shows the cached library in slices so the window stays responsive
-  scan.on = true; try { await lib.addChunked(srcs, libId, { onProgress: (n, total) => { scan.text = `Loading your library… ${n.toLocaleString()} of ${total.toLocaleString()}`; renderAll(); } }); } finally { scan.on = false; }
+  let drawn = 0; scan.on = true; try { await lib.addChunked(srcs, libId, { onProgress: (n, total) => { scan.text = `Loading your library… ${n.toLocaleString()} of ${total.toLocaleString()}`; const now = performance.now(); if (!drawn || now - drawn > 250) { drawn = now; renderAll(); } } }); } finally { scan.on = false; }      // the lists follow a few times a second: each redraw sorts everything loaded so far
 }
 async function restoreFromCache(only = null) {      // only: a source plugin's id (it was just turned on): just its connections
   for (const ix of await cache.indexes()) {
@@ -333,7 +333,7 @@ addEventListener('dragover', e => { e.preventDefault(); document.body.classList.
 addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('drop'); });
 addEventListener('drop', async e => { e.preventDefault(); document.body.classList.remove('drop'); if (!TAURI) addSources(await filesFromDrop(e.dataTransfer), 'Dropped'); });
 if (TAURI?.event) TAURI.event.listen('tauri://drag-drop', async ev => {
-  document.body.classList.remove('drop'); const sources = []; for (const p of ev.payload.paths || []) { try { const st = await TAURI.fs.stat(p); if (st.isDirectory) sources.push(...await scanFolder(p)); else sources.push(...await sourcesFromPathsTauri([p])); } catch (err) { toast(String(err), true); } } addSources(sources, 'Dropped');
+  document.body.classList.remove('drop'); const sources = []; for (const p of ev.payload.paths || []) { try { const st = await TAURI.fs.stat(p); for (const x of st.isDirectory ? await scanFolder(p) : await sourcesFromPathsTauri([p])) sources.push(x); } catch (err) { toast(String(err), true); } } addSources(sources, 'Dropped');
 });
 
 // Files opened from the OS (Finder/Explorer “Open With”, bootleg as the default player, `bootleg song.flac`): the shell keeps
@@ -367,18 +367,27 @@ player.addEventListener('change', syncDJ);
 $('#djBtn').onclick = () => player.setDJ(!player.dj);
 player.addEventListener('playerror', e => toast(e.detail, true));      // never fail silently: say why nothing is playing
 let drag = false; seek.oninput = () => { drag = true; }; seek.onchange = () => { const d = player.dur(); if (d) player.seek(seek.value / 1000 * d); drag = false; };
-(function loop() { const d = player.dur(), p = player.pos(); if (!drag) seek.value = d ? Math.round(p / d * 1000) : 0; vizDock.update(); dj.paint(); $('#tcur').textContent = fmt(p); $('#tdur').textContent = fmt(d); paintMeters(); requestAnimationFrame(loop); })();
+// every frame, so it only touches the page when what it shows has changed (the clock text changes once a second, the seek bar ~once a pixel)
+{ const tcur = $('#tcur'), tdur = $('#tdur'); let sv = -1, sc = '', sd = '';
+  (function loop() {
+    const d = player.dur(), p = player.pos(), v = d ? Math.round(p / d * 1000) : 0, c = fmt(p), dd = fmt(d);
+    if (!drag && (v !== sv || +seek.value !== v)) { seek.value = v; sv = v; } if (c !== sc) tcur.textContent = sc = c; if (dd !== sd) tdur.textContent = sd = dd;
+    vizDock.update(); dj.paint(); paintMeters(); requestAnimationFrame(loop);
+  })(); }
 playBtn.onclick = () => { if (!player.item) { if (shown.length) player.playList(shown, 0); else if (lib.renders.length) player.playList(lib.renders, 0); return; } player.toggle(); };
 $('#prev').onclick = () => player.prev(); $('#next').onclick = () => player.next();
 $('#shuffle').onclick = () => player.setShuffle(!player.shuffle); $('#repeat').onclick = () => player.setRepeat({ off: 'all', all: 'one', one: 'off' }[player.repeat]);
 const vol = $('#volume'); vol.value = player.volume; vol.oninput = () => player.setVolume(+vol.value);
 
 // ------------------------------------------------------------------ queue
+// Only the rows in view exist (a queue is often the whole track list), and nothing is drawn while the drawer is closed.
+const queueRow = (t, i) => h('div', { class: 'qi' + (i === player.index ? ' cur' : ''), onclick: () => player.jump(i) }, h('div', { style: 'min-width:0' }, h('div', { class: 't' }, t.title), h('div', { class: 's' }, t.artist || (t.kind === 'render' ? 'stem render' : ''))), h('span', { class: 'qb' }, ...(player.dj ? [h('button', { class: 'mini', title: 'Load onto deck A', onclick: e => { e.stopPropagation(); player.djLoad(player.A, t); } }, 'A'), h('button', { class: 'mini', title: 'Load onto deck B', onclick: e => { e.stopPropagation(); player.djLoad(player.B, t); } }, 'B')] : []), h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); player.remove(i); } }, '✕')));
+const queueVL = new VirtualList({ scroller: $('#queue'), container: $('#queueList'), rowH: 46, render: queueRow });
 function renderQueue() {
-  const q = player.queue, list = $('#queueList'); $('#queueEmpty').hidden = q.length > 0;
-  list.replaceChildren(...q.map((t, i) => h('div', { class: 'qi' + (i === player.index ? ' cur' : ''), onclick: () => player.jump(i) }, h('div', { style: 'min-width:0' }, h('div', { class: 't' }, t.title), h('div', { class: 's' }, t.artist || (t.kind === 'render' ? 'stem render' : ''))), h('span', { class: 'qb' }, ...(player.dj ? [h('button', { class: 'mini', title: 'Load onto deck A', onclick: e => { e.stopPropagation(); player.djLoad(player.A, t); } }, 'A'), h('button', { class: 'mini', title: 'Load onto deck B', onclick: e => { e.stopPropagation(); player.djLoad(player.B, t); } }, 'B')] : []), h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); player.remove(i); } }, '✕')))));
+  const q = player.queue; $('#queueEmpty').hidden = q.length > 0; if ($('#queue').hidden) return;
+  if (queueVL.items.length || q.length) queueVL.setItems(q);
 }
-$('#qToggle').onclick = () => { const q = $('#queue'); q.hidden = !q.hidden; $('#qToggle').classList.toggle('on', !q.hidden); }; $('#qClear').onclick = () => player.clear();
+$('#qToggle').onclick = () => { const q = $('#queue'); q.hidden = !q.hidden; $('#qToggle').classList.toggle('on', !q.hidden); renderQueue(); }; $('#qClear').onclick = () => player.clear();
 
 // ------------------------------------------------------------------ stems mixer
 let stemEls = [];
